@@ -1,0 +1,102 @@
+name: Flutter Android
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, mofuel]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Validar Flutter y preparar APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Instalar dependencias
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analizar el código
+        run: flutter analyze --no-pub
+
+      - name: Ejecutar las pruebas de Flutter
+        run: flutter test --no-pub
+
+      - name: Preparar configuración de Android
+        if: github.event_name != 'pull_request'
+        env:
+          CLIENT_CONFIG: ${{ secrets.CONECTA2_FLUTTER_CONFIG_JSON }}
+          PREVIEW_KEYSTORE: ${{ secrets.ANDROID_PREVIEW_KEYSTORE_B64 }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          raw = os.environ.get('CLIENT_CONFIG') or '{}'
+          try:
+              config = json.loads(raw)
+          except ValueError:
+              raise SystemExit('CONECTA2_FLUTTER_CONFIG_JSON debe contener JSON válido.') from None
+          if not isinstance(config, dict):
+              raise SystemExit('CONECTA2_FLUTTER_CONFIG_JSON debe ser un objeto JSON.')
+          if config.get('CONECTA2_API_URL'):
+              required = ('ENTRA_TENANT_SUBDOMAIN', 'ENTRA_TENANT_ID',
+                          'ENTRA_API_CLIENT_ID', 'ENTRA_MOBILE_CLIENT_ID')
+              missing = [key for key in required if not config.get(key)]
+              if missing:
+                  raise SystemExit('Faltan valores de Entra: ' + ', '.join(missing))
+          elif bool(config.get('SUPABASE_URL')) != bool(config.get('SUPABASE_ANON_KEY')):
+              raise SystemExit('Supabase requiere SUPABASE_URL y SUPABASE_ANON_KEY.')
+          elif not config.get('SUPABASE_URL'):
+              print('::notice::El APK se compilará sin conexión a un backend.')
+
+          Path(os.environ['RUNNER_TEMP'], 'conecta2-flutter.json').write_text(
+              json.dumps(config), encoding='utf-8'
+          )
+          PY
+
+          if [[ -n "$PREVIEW_KEYSTORE" ]]; then
+            install -d -m 700 "$HOME/.android"
+            umask 077
+            printf '%s' "$PREVIEW_KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore"
+          else
+            echo '::notice::El APK usará la firma de depuración del runner.'
+          fi
+
+      - name: Compilar el APK de vista previa
+        if: github.event_name != 'pull_request'
+        run: |
+          flutter build apk --debug --no-pub --build-number "$GITHUB_RUN_NUMBER" \
+            --dart-define-from-file="$RUNNER_TEMP/conecta2-flutter.json"
+
+      - name: Publicar el APK en Actions
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conecta2-android-${{ github.run_number }}-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
