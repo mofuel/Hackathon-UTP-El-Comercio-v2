@@ -150,6 +150,14 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   Publication? get lastSubmittedPublication => _lastSubmittedPublication;
 
   /// Filtros del directorio de servicios
+  List<Publication> _directoryPublications = const [];
+  static const _directoryRangeMeters = 20000;
+
+  double? get directoryLat =>
+      activeLat ?? locationCatalog.district(activeDistrictUbigeo)?.capitalLat;
+  double? get directoryLng =>
+      activeLng ?? locationCatalog.district(activeDistrictUbigeo)?.capitalLng;
+
   String _serviceSearchQuery = '';
   String get serviceSearchQuery => _serviceSearchQuery;
 
@@ -614,6 +622,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     final allPublications = await database.listPublications(
       activeUserId: activeId,
     );
+    _directoryPublications = allPublications
+        .where((p) => p.kind.isService || p.isProduct)
+        .toList();
     _publications = allPublications.where((publication) {
       if (publication.ownerUserId == activeId) return true;
       final distance = publication.distanceFrom(lat: activeLat, lng: activeLng);
@@ -657,10 +668,13 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (_selectedPublication != null) {
-      final updated = _publications
-          .where((p) => p.id == _selectedPublication!.id)
-          .toList();
-      _selectedPublication = updated.firstOrNull;
+      final selected = _selectedPublication!;
+      final candidates = selected.kind.isService || selected.isProduct
+          ? _directoryPublications
+          : _publications;
+      _selectedPublication = candidates
+          .where((p) => p.id == selected.id)
+          .firstOrNull;
     }
 
     notifyListeners();
@@ -858,6 +872,10 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Abre el detalle de un favor o emergencia (Clic 2 desde Ver favores y ayudar).
   void openFavorDetail(Publication favor) {
+    if (favor.isProduct) {
+      openServiceDetail(favor);
+      return;
+    }
     _selectedPublication = favor;
     navigateTo(AppSection.detalleFavor);
   }
@@ -871,7 +889,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     final user = _currentUser;
     if (user == null) {
       _pendingAuthIntent = PendingAuthIntent(
-        description: 'Recomendar servicio de ${service.authorAlias}',
+        description: 'Recomendar publicación de ${service.authorAlias}',
         targetRoute: 'detalle_servicio',
         publicationId: service.id,
       );
@@ -1505,13 +1523,92 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  List<Publication> get filteredServices {
-    return _publications.where((p) {
-      if (!p.kind.isService) return false;
-      if (_serviceCategoryFilter != 'todos' &&
-          p.category != _serviceCategoryFilter) {
+  Future<void> refreshServiceDirectory({
+    double? nearLat,
+    double? nearLng,
+  }) async {
+    final userId = currentUser?.id;
+    if (userId == null ||
+        isOfflineMode ||
+        !remoteGateway.isLiveSupabaseConnected) {
+      return;
+    }
+    final district = activeDistrictUbigeo;
+    final origin = approximateMapPoint(
+      nearLat ?? directoryLat,
+      nearLng ?? directoryLng,
+    );
+    if (district == null && origin == null) return;
+
+    Future<List<Publication>> fetch({
+      required PublicationKind kind,
+      String? category,
+      bool byDistrict = false,
+    }) => remoteGateway
+        .fetchPublicationsWithinRadius(
+          originLat: byDistrict ? null : origin?.latitude,
+          originLng: byDistrict ? null : origin?.longitude,
+          radiusMeters: _directoryRangeMeters,
+          districtUbigeo: byDistrict ? district : null,
+          kind: kind,
+          category: category,
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final pages = await Future.wait([
+      if (district != null) ...[
+        fetch(kind: PublicationKind.servicio, byDistrict: true),
+        fetch(
+          kind: PublicationKind.anuncio,
+          category: Publication.productCategory,
+          byDistrict: true,
+        ),
+      ],
+      if (origin != null) ...[
+        fetch(kind: PublicationKind.servicio),
+        fetch(
+          kind: PublicationKind.anuncio,
+          category: Publication.productCategory,
+        ),
+      ],
+    ]);
+    if (_disposed ||
+        currentUser?.id != userId ||
+        activeDistrictUbigeo != district) {
+      return;
+    }
+    final results = {for (final p in pages.expand((page) => page)) p.id: p};
+    await database.mergeRemotePublications(results.values.toList());
+    if (!_disposed && currentUser?.id == userId) await refreshAllLocalData();
+  }
+
+  List<Publication> get filteredServices => directoryServices();
+
+  List<Publication> directoryServices({double? nearLat, double? nearLng}) {
+    final origin = approximateMapPoint(
+      nearLat ?? directoryLat,
+      nearLng ?? directoryLng,
+    );
+    final district = activeDistrictUbigeo;
+    final owner = currentUser?.id ?? Publication.guestOwnerId;
+    return _directoryPublications.where((p) {
+      final distance = p.distanceFrom(
+        lat: origin?.latitude,
+        lng: origin?.longitude,
+      );
+      final sameDistrict = district != null && p.districtUbigeo == district;
+      if (p.ownerUserId != owner &&
+          !sameDistrict &&
+          (distance == null || distance > _directoryRangeMeters)) {
         return false;
       }
+      final matchesCategory =
+          _serviceCategoryFilter == Publication.productCategory
+          ? p.isProduct
+          : p.kind.isService &&
+                (_serviceCategoryFilter == 'todos' ||
+                    p.category == _serviceCategoryFilter);
+      if (!matchesCategory) return false;
       if (_serviceSearchQuery.trim().isNotEmpty) {
         final q = _serviceSearchQuery.trim().toLowerCase();
         final match =
@@ -1522,13 +1619,8 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
         if (!match) return false;
       }
       if (_serviceRadiusMeters != null && _serviceRadiusMeters! > 0) {
-        final dist = p.distanceFrom(lat: activeLat, lng: activeLng);
-        if (dist != null && dist > _serviceRadiusMeters!) return false;
-        if (dist == null &&
-            (activeDistrictUbigeo == null ||
-                p.districtUbigeo != activeDistrictUbigeo)) {
-          return false;
-        }
+        if (distance != null && distance > _serviceRadiusMeters!) return false;
+        if (distance == null && !sameDistrict) return false;
       }
       return true;
     }).toList();
@@ -1550,7 +1642,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   List<Publication> get filteredFavors {
     return _publications.where((p) {
-      if (!p.kind.isSolidarityFavor) return false;
+      if (!p.kind.isSolidarityFavor || p.isProduct) return false;
       if (_favorCategoryFilter != 'todos' &&
           p.category != _favorCategoryFilter) {
         return false;
@@ -1799,7 +1891,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       if (match.isNotEmpty) {
         _selectedPublication = match.first;
         navigateTo(
-          match.first.kind.isService
+          match.first.kind.isService || match.first.isProduct
               ? AppSection.detalleServicio
               : AppSection.detalleFavor,
         );

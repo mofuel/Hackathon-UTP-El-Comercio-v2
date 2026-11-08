@@ -1067,7 +1067,7 @@ class LocalSqliteDatabase {
         where: 'owner_user_id = ? AND draft_key = ?',
         whereArgs: [
           pendingPub.ownerUserId,
-          '${pendingPub.ownerUserId}::publish_${pendingPub.kind.dbValue}',
+          '${pendingPub.ownerUserId}::${FormDraft.publicationKey(pendingPub.kind, pendingPub.category)}',
         ],
       );
 
@@ -1380,7 +1380,7 @@ class LocalSqliteDatabase {
 
   /// Registra o modifica una recomendación vecinal.
   /// Reglas estrictas:
-  /// - Solo para servicios (`PublicationKind.servicio`).
+  /// - Los productos solo admiten recomendaciones del mismo distrito y sector.
   /// - Prohibida la auto-recomendación (`authorId == userId`).
   /// - Máximo una recomendación por `(publicationId, userId)`.
   Future<ServiceRecommendation> submitOrUpdateRecommendation({
@@ -1403,13 +1403,30 @@ class LocalSqliteDatabase {
       }
       final pub = Publication.fromSqlMap(pubRows.first);
       if (pub.isDeleted) throw StateError('La publicación fue eliminada.');
-      if (!pub.kind.isService) {
+      if (!pub.kind.isService && !pub.isProduct) {
         throw StateError(
-          'Solo se pueden recomendar oficios o servicios del directorio.',
+          'Solo se pueden recomendar servicios y productos del directorio.',
         );
       }
       if (pub.authorId == userId) {
-        throw StateError('No puedes recomendar tu propio servicio.');
+        throw StateError(
+          pub.isProduct
+              ? 'No puedes recomendar tu propio producto.'
+              : 'No puedes recomendar tu propio servicio.',
+        );
+      }
+      if (pub.isProduct) {
+        final profiles = await txn.query(
+          'profiles_local',
+          where: 'id = ?',
+          whereArgs: [userId],
+        );
+        if (profiles.isEmpty ||
+            !pub.isInSameZoneAs(UserProfile.fromSqlMap(profiles.single))) {
+          throw StateError(
+            'Solo pueden recomendar este producto los vecinos del mismo distrito y sector.',
+          );
+        }
       }
 
       final existingRows = await txn.query(
@@ -1420,7 +1437,7 @@ class LocalSqliteDatabase {
 
       if (existingRows.isNotEmpty && !allowUpdateExisting) {
         throw StateError(
-          'Ya registraste una recomendación para este servicio. Puedes modificarla o retirarla.',
+          'Ya registraste una recomendación. Puedes modificarla o retirarla.',
         );
       }
 
@@ -1449,8 +1466,8 @@ class LocalSqliteDatabase {
 
       await txn.upsert('recommendations_local', 'id', rec.toSqlMap());
 
-      // Actualizar conteo en la ficha del servicio si era nueva
-      if (existingRows.isEmpty) {
+      // Los productos muestran solo vistos buenos confirmados.
+      if (existingRows.isEmpty && !pub.isProduct) {
         final updatedPub = pub.copyWith(
           recommendationCount: pub.recommendationCount + 1,
           updatedAt: now,
@@ -1487,7 +1504,7 @@ class LocalSqliteDatabase {
       );
       if (existingRows.isEmpty) {
         throw StateError(
-          'No tienes una recomendación activa en este servicio.',
+          'No tienes una recomendación activa en esta publicación.',
         );
       }
       final existing = ServiceRecommendation.fromSqlMap(existingRows.first);
@@ -1502,8 +1519,10 @@ class LocalSqliteDatabase {
         where: 'id = ?',
         whereArgs: [publicationId],
       );
-      if (pubRows.isNotEmpty) {
-        final pub = Publication.fromSqlMap(pubRows.first);
+      final pub = pubRows.isEmpty
+          ? null
+          : Publication.fromSqlMap(pubRows.first);
+      if (pub != null && !pub.isProduct) {
         final updatedPub = pub.copyWith(
           recommendationCount: pub.recommendationCount > 0
               ? pub.recommendationCount - 1

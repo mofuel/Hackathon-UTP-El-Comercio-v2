@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/accessibility/accessibility_controller.dart';
 import '../../core/models/domain_models.dart';
@@ -360,12 +361,14 @@ class AccessibleQuadrantMapWidget extends StatelessWidget {
     required this.originLat,
     required this.originLng,
     required this.onSelectPublication,
+    this.privateLocation,
     this.online = false,
   });
   final List<Publication> publications;
   final double? originLat;
   final double? originLng;
   final ValueChanged<Publication> onSelectPublication;
+  final LatLng? privateLocation;
   final bool online;
   @override
   Widget build(BuildContext context) => Column(
@@ -381,7 +384,8 @@ class AccessibleQuadrantMapWidget extends StatelessWidget {
       NeighborhoodMap(
         online: online,
         records: publications.map(NeighborhoodMapRecord.publication).toList(),
-        center: approximateMapPoint(originLat, originLng),
+        center: privateLocation ?? approximateMapPoint(originLat, originLng),
+        privateLocation: privateLocation,
         onSelect: (record) => onSelectPublication(record.publication!),
       ),
       for (final publication in publications)

@@ -91,8 +91,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   // 3. Publicar servicio o favor (3 clics total: Inicio -> elegir tipo -> escribir -> Publicar en mi barrio)
                   _PrimaryCivicActionButton(
                     buttonKey: const Key('btn_home_publicar_servicio_favor'),
-                    label: 'Publicar servicio o favor',
-                    subtitle: 'Ofrecer tu oficio, prestar herramienta o ayudar (3 pasos)',
+                    label: 'Publicar en el barrio',
+                    subtitle: 'Ofrecer un producto, oficio o favor (3 pasos)',
                     icon: Icons.add_circle_outline,
                     backgroundColor: AppTheme.surfaceCard,
                     foregroundColor: AppTheme.textPrimary,
@@ -107,8 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   // 4. Buscar servicios (3 clics total para contactar o recomendar)
                   _PrimaryCivicActionButton(
                     buttonKey: const Key('btn_home_buscar_servicios'),
-                    label: 'Buscar servicios',
-                    subtitle: 'Electricistas, costureras, gasfiteros y oficios cercanos',
+                    label: 'Buscar productos y servicios',
+                    subtitle:
+                        'Encuentra productos y oficios cerca de tu sector',
                     icon: Icons.search,
                     backgroundColor: AppTheme.surfaceCard,
                     foregroundColor: AppTheme.textPrimary,

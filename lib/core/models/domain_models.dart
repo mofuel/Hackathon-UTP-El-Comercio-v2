@@ -267,6 +267,7 @@ class UserProfile {
 /// Publicación unificada (Servicio del directorio, Favor solidario o Reporte de emergencia).
 class Publication {
   static const guestOwnerId = 'anonymous';
+  static const productCategory = 'producto';
 
   const Publication({
     this.deletedAt,
@@ -312,6 +313,19 @@ class Publication {
   final String authorAlias;
   final PublicationKind kind;
   final String category;
+  bool get isProduct =>
+      kind == PublicationKind.anuncio && category == productCategory;
+
+  bool isInSameZoneAs(UserProfile profile) {
+    final district = districtUbigeo;
+    final normalizedSector = sector.trim().toLowerCase();
+    return district != null &&
+        district.isNotEmpty &&
+        district == profile.districtUbigeo &&
+        normalizedSector.isNotEmpty &&
+        normalizedSector == profile.sector.trim().toLowerCase();
+  }
+
   final String title;
   final String description;
   final String neighborhood;
@@ -964,6 +978,11 @@ class OutboxOperation {
 
 /// Borrador local persistido por usuario y clave de formulario.
 class FormDraft {
+  static String publicationKey(PublicationKind kind, String category) =>
+      kind == PublicationKind.anuncio && category == Publication.productCategory
+      ? 'publish_producto'
+      : 'publish_${kind.dbValue}';
+
   const FormDraft({
     required this.draftKey,
     required this.ownerUserId,

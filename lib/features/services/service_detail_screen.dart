@@ -36,22 +36,35 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.controller.selectedPublication?.isProduct == true) {
+      _recCommentController.clear();
+    }
     _loadRecommendations();
   }
 
-  Future<void> _loadRecommendations() async {
+  @override
+  void didUpdateWidget(covariant ServiceDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.controller.selectedPublication?.isProduct == true) {
+      _loadRecommendations(restoreComment: false);
+    }
+  }
+
+  Future<void> _loadRecommendations({bool restoreComment = true}) async {
     final srv = widget.controller.selectedPublication;
     if (srv == null) return;
     final list = await widget.controller.database.listRecommendationsForService(
       srv.id,
     );
-    if (mounted) {
+    if (mounted && widget.controller.selectedPublication?.id == srv.id) {
       setState(() {
         _recommendations = list;
         _recommendationsLoading = false;
         final userId = widget.controller.currentUser?.id;
         final mine = list.where((r) => r.userId == userId).firstOrNull;
-        if (mine != null) _recCommentController.text = mine.comment;
+        if (restoreComment && mine != null) {
+          _recCommentController.text = mine.comment;
+        }
       });
     }
   }
@@ -141,11 +154,21 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
       );
     }
 
-    final currentUserId = c.currentUser?.id;
+    final user = c.currentUser;
     final myRec = _recommendations
-        .where((r) => r.userId == currentUserId)
-        .toList();
-    final hasMyRecommendation = myRec.isNotEmpty;
+        .where((r) => r.userId == user?.id)
+        .firstOrNull;
+    final hasMyRecommendation = myRec != null;
+    final confirmedCount = _recommendations
+        .where((r) => r.syncStatus.isConfirmed)
+        .length;
+    final productRestriction = !srv.isProduct || user == null
+        ? null
+        : user.id == srv.authorId
+        ? 'El autor no puede recomendar su propio producto.'
+        : !srv.isInSameZoneAs(user)
+        ? 'Solo los vecinos del mismo distrito y sector pueden recomendar este producto.'
+        : null;
 
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -183,7 +206,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Prestador vecinal: ${srv.authorAlias}',
+                  '${srv.isProduct ? 'Publicado por' : 'Prestador vecinal'}: ${srv.authorAlias}',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -212,30 +235,31 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                   const Text('Punto de atención compartido por el autor'),
                   if (srv.serviceAddress.isNotEmpty) Text(srv.serviceAddress),
                 ],
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.schedule, color: AppTheme.actionGreen),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Disponibilidad: ${srv.availabilityText}',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
+                if (!srv.isProduct) const SizedBox(height: 10),
+                if (!srv.isProduct)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.schedule, color: AppTheme.actionGreen),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Disponibilidad: ${srv.availabilityText}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -282,9 +306,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Contactar al prestador en chat privado',
-                  style: TextStyle(
+                Text(
+                  srv.isProduct
+                      ? 'Contactar a quien publica en chat privado'
+                      : 'Contactar al prestador en chat privado',
+                  style: const TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.textPrimary,
@@ -324,7 +350,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
 
           const SizedBox(height: 16),
 
-          // Bloque 2: Recomendar servicio (Clic 3 desde Inicio)
+          // Bloque 2: Recomendar la publicación (Clic 3 desde Inicio).
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -335,9 +361,11 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Recomendaciones y opiniones de vecinos',
-                  style: TextStyle(
+                Text(
+                  srv.isProduct
+                      ? 'Vistos buenos ($confirmedCount)'
+                      : 'Recomendaciones y opiniones de vecinos',
+                  style: const TextStyle(
                     fontSize: 19,
                     fontWeight: FontWeight.w800,
                     color: AppTheme.textPrimary,
@@ -350,15 +378,27 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                     color: AppTheme.surfaceContainer,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text(
-                    'Nota comunitaria: Las recomendaciones son opiniones personales de vecinos del barrio, NO certificaciones técnicas ni avales oficiales.',
-                    style: TextStyle(
+                  child: Text(
+                    srv.isProduct
+                        ? 'El Visto Bueno cuenta cuando se confirma que viene de un vecino del mismo distrito y sector.'
+                        : 'Nota comunitaria: Las recomendaciones son opiniones personales de vecinos del barrio, NO certificaciones técnicas ni avales oficiales.',
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: AppTheme.textSecondary,
                     ),
                   ),
                 ),
+                if (productRestriction != null) ...[
+                  const SizedBox(height: 8),
+                  Text(productRestriction),
+                ],
+                if (srv.isProduct &&
+                    myRec != null &&
+                    !myRec.syncStatus.isConfirmed) ...[
+                  const SizedBox(height: 8),
+                  SyncStatusBadge(status: myRec.syncStatus),
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   contextMenuBuilder: buildTextSelectionToolbar,
@@ -374,15 +414,22 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 58),
                   child: ElevatedButton.icon(
-                    key: const Key('btn_recomendar_servicio'),
+                    key: srv.isProduct
+                        ? const Key('btn_recomendar_producto')
+                        : const Key('btn_recomendar_servicio'),
                     onPressed:
                         _recommendationsLoading ||
                             _savingRecommendation ||
-                            hasMyRecommendation
+                            hasMyRecommendation ||
+                            productRestriction != null
                         ? null
                         : () => _handleRecommend(srv, allowUpdate: false),
                     icon: const Icon(Icons.thumb_up_alt_outlined, size: 24),
-                    label: const Text('He usado este servicio y lo recomiendo'),
+                    label: Text(
+                      srv.isProduct
+                          ? 'Recomiendo este producto'
+                          : 'He usado este servicio y lo recomiendo',
+                    ),
                   ),
                 ),
                 if (hasMyRecommendation) ...[
@@ -393,7 +440,8 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                     children: [
                       OutlinedButton.icon(
                         key: const Key('btn_modificar_recomendacion'),
-                        onPressed: _savingRecommendation
+                        onPressed:
+                            _savingRecommendation || productRestriction != null
                             ? null
                             : () => _handleRecommend(srv, allowUpdate: true),
                         icon: const Icon(Icons.edit_outlined),
@@ -411,49 +459,53 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                Text(
-                  'Opiniones registradas (${_recommendations.length}):',
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final rec in _recommendations)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceContainer,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            rec.userAlias,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.actionGreen,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            rec.comment.isEmpty
-                                ? 'Recomienda este servicio en el barrio.'
-                                : rec.comment,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: AppTheme.textPrimary,
-                            ),
-                          ),
-                        ],
-                      ),
+                if (!srv.isProduct)
+                  Text(
+                    'Opiniones registradas (${_recommendations.length}):',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
+                const SizedBox(height: 8),
+                for (final rec in _recommendations)
+                  if (!srv.isProduct || rec.syncStatus.isConfirmed)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              rec.userAlias,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.actionGreen,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              rec.comment.isEmpty
+                                  ? srv.isProduct
+                                        ? 'Recomienda este producto en el barrio.'
+                                        : 'Recomienda este servicio en el barrio.'
+                                  : rec.comment,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
               ],
             ),
           ),

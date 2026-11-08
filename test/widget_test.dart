@@ -85,6 +85,162 @@ void main() {
     );
   });
 
+  testWidgets(
+    'Un vecino publica un producto con precio y otra cuenta lo encuentra por cercanía',
+    (tester) async {
+      final publisher = await _createInitializedTestController(offline: true);
+      final reader = await _createInitializedTestController(signedIn: false);
+      addTearDown(publisher.dispose);
+      addTearDown(reader.dispose);
+      await reader.signIn(
+        email: 'lector-productos@example.test',
+        password: 'clave-de-prueba',
+      );
+      expect(reader.currentUser!.id, isNot(publisher.currentUser!.id));
+      for (final controller in [publisher, reader]) {
+        await controller.updateLocationPreference(
+          neighborhood: 'Pueblo Libre',
+          sector: 'Sector San Martín',
+          districtUbigeo: '150121',
+          approxLat: AppConfig.defaultLat,
+          approxLng: AppConfig.defaultLng,
+          useGpsApprox: false,
+        );
+      }
+
+      final accessibility = AccessibilityController();
+      addTearDown(accessibility.dispose);
+      await tester.pumpWidget(
+        Conecta2App(
+          key: ObjectKey(publisher),
+          appController: publisher,
+          accessibilityController: accessibility,
+        ),
+      );
+      final publish = find.byKey(const Key('btn_home_publicar_servicio_favor'));
+      await tester.ensureVisible(publish);
+      await tester.tap(publish);
+      await tester.pumpAndSettle();
+      final productChip = find.byKey(const Key('chip_kind_producto'));
+      await tester.ensureVisible(productChip);
+      await tester.tap(productChip);
+      await tester.pumpAndSettle();
+      expect(find.text('Descripción y precio del producto'), findsOneWidget);
+
+      final title = find.byKey(const Key('input_publish_title'));
+      final description = find.byKey(const Key('input_publish_description'));
+      const price = 'Precio: S/ 10. Entrega cerca del parque.';
+      await tester.enterText(title, 'Mochila de barrio');
+      await tester.enterText(description, price);
+      final submit = find.byKey(const Key('btn_submit_publication'));
+      await tester.ensureVisible(submit);
+      await tester.tap(submit);
+      await tester.pumpAndSettle();
+
+      final product = publisher.lastSubmittedPublication!;
+      expect(product.kind, PublicationKind.anuncio);
+      expect(product.isProduct, isTrue);
+      expect(product.description, price);
+      expect(product.syncStatus, SyncStatus.pendiente);
+      expect(
+        await publisher.database.getDraft(
+          ownerUserId: publisher.currentUser!.id,
+          draftKey: 'publish_producto',
+        ),
+        isNull,
+      );
+      final announcement = await publisher.submitPublication(
+        kind: PublicationKind.anuncio,
+        category: 'general',
+        title: 'Mochila extraviada',
+        description: 'Aviso general del barrio.',
+      );
+      publisher.remoteGateway.simulateNetworkOffline = false;
+      publisher.outboxSyncService.networkAvailable = true;
+      await publisher.retryOutboxSync();
+      final confirmed = publisher.publications.singleWhere(
+        (item) => item.id == product.id,
+      );
+      expect(confirmed.syncStatus, SyncStatus.confirmado);
+
+      await reader.database.mergeRemotePublications([
+        confirmed,
+        announcement.copyWith(syncStatus: SyncStatus.confirmado),
+      ]);
+      await reader.refreshAllLocalData();
+      reader.navigateTo(AppSection.servicios);
+      await tester.pumpWidget(
+        Conecta2App(
+          key: ObjectKey(reader),
+          appController: reader,
+          accessibilityController: accessibility,
+        ),
+      );
+      final card = find.byKey(Key('card_service_${product.id}'));
+      expect(card, findsNothing);
+      await tester.tap(find.byKey(const Key('chip_service_cat_producto')));
+      await tester.pumpAndSettle();
+      final radius = find.byKey(const Key('chip_radius_600'));
+      await tester.ensureVisible(radius);
+      await tester.tap(radius);
+      await tester.pumpAndSettle();
+      final search = find.byKey(const Key('input_search_services'));
+      await tester.enterText(search, 'mochila');
+      await tester.pumpAndSettle();
+      expect(reader.filteredServices.map((item) => item.id), [product.id]);
+      expect(
+        reader.filteredFavors.any((item) => item.id == product.id),
+        isFalse,
+      );
+      await tester.ensureVisible(card);
+      expect(find.text(price), findsOneWidget);
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      expect(find.text(price), findsOneWidget);
+      expect(find.byKey(const Key('btn_recomendar_servicio')), findsNothing);
+      final endorse = find.byKey(const Key('btn_recomendar_producto'));
+      await tester.ensureVisible(endorse);
+      expect(find.text('Vistos buenos (0)'), findsOneWidget);
+      await reader.updateLocationPreference(
+        neighborhood: 'Pueblo Libre',
+        sector: 'Sector Plaza Bolívar',
+        districtUbigeo: '150121',
+        approxLat: AppConfig.defaultLat,
+        approxLng: AppConfig.defaultLng,
+        useGpsApprox: false,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.widget<ElevatedButton>(endorse).onPressed, isNull);
+      await expectLater(
+        reader.recommendService(service: confirmed),
+        throwsStateError,
+      );
+      await reader.updateLocationPreference(
+        neighborhood: 'Pueblo Libre',
+        sector: 'Sector San Martín',
+        districtUbigeo: '150121',
+        approxLat: AppConfig.defaultLat,
+        approxLng: AppConfig.defaultLng,
+        useGpsApprox: false,
+      );
+      await tester.pumpAndSettle();
+      reader.outboxSyncService.networkAvailable = false;
+      await tester.tap(endorse);
+      await tester.pumpAndSettle();
+      expect(find.text('Vistos buenos (0)'), findsOneWidget);
+      reader.outboxSyncService.networkAvailable = true;
+      await reader.retryOutboxSync();
+      await tester.pumpAndSettle();
+      expect(find.text('Vistos buenos (1)'), findsOneWidget);
+
+      await reader.database.mergeRemotePublications([
+        confirmed.copyWith(approxLat: reader.activeLat! + 0.05),
+      ]);
+      await reader.refreshAllLocalData();
+      expect(reader.filteredServices, isEmpty);
+    },
+  );
+
   group('1. Presupuesto estricto de <= 3 clics desde Inicio', () {
     testWidgets(
       'Tarea 1 (Pedir ayuda): Inicio -> Necesito ayuda (Clic 1) -> escribir -> Enviar solicitud (Clic 2)',

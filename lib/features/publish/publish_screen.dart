@@ -39,6 +39,15 @@ class _PublishScreenState extends State<PublishScreen> {
   bool _submitting = false;
   ChosenMapLocation? _location;
 
+  bool get _isProduct => _selectedCategory == Publication.productCategory;
+  String get _draftKey =>
+      FormDraft.publicationKey(_selectedKind, _selectedCategory);
+  bool get _hasDraftContent =>
+      _titleController.text.trim().isNotEmpty ||
+      _descController.text.trim().isNotEmpty ||
+      _availabilityController.text.trim().isNotEmpty ||
+      _location != null;
+
   @override
   void initState() {
     super.initState();
@@ -69,12 +78,18 @@ class _PublishScreenState extends State<PublishScreen> {
   }
 
   Future<void> _restoreExistingDraftIfAny() async {
+    if (_hasDraftContent) return;
+    final draftKey = _draftKey;
     final draft = await widget.controller.database.getDraft(
       ownerUserId:
           widget.controller.currentUser?.id ?? Publication.guestOwnerId,
-      draftKey: 'publish_${_selectedKind.dbValue}',
+      draftKey: draftKey,
     );
-    if (draft != null && mounted) {
+    if (draft != null &&
+        mounted &&
+        !_submitting &&
+        draftKey == _draftKey &&
+        !_hasDraftContent) {
       setState(() {
         _titleController.text = draft.title;
         _descController.text = draft.description;
@@ -100,7 +115,7 @@ class _PublishScreenState extends State<PublishScreen> {
     }
     await widget.controller.database.saveDraft(
       FormDraft(
-        draftKey: 'publish_${_selectedKind.dbValue}',
+        draftKey: _draftKey,
         ownerUserId:
             widget.controller.currentUser?.id ?? Publication.guestOwnerId,
         kind: _selectedKind,
@@ -255,6 +270,12 @@ class _PublishScreenState extends State<PublishScreen> {
                         label: 'Oficio o servicio',
                       ),
                       _buildKindSelectorChip(
+                        key: const Key('chip_kind_producto'),
+                        kind: PublicationKind.anuncio,
+                        category: Publication.productCategory,
+                        label: 'Producto',
+                      ),
+                      _buildKindSelectorChip(
                         key: const Key('chip_kind_favor_oferta'),
                         kind: PublicationKind.favorOferta,
                         label: 'Ofrecer favor gratuito',
@@ -334,6 +355,8 @@ class _PublishScreenState extends State<PublishScreen> {
                   decoration: InputDecoration(
                     labelText: _selectedKind.isEmergency
                         ? '¿Qué necesitas o qué ocurre en tu cuadra?'
+                        : _isProduct
+                        ? 'Nombre del producto'
                         : 'Título breve (ej. Electricista a domicilio / Escalera)',
                     hintText: _selectedKind.isEmergency
                         ? 'Ej. Adulto mayor necesita agua potable y linterna'
@@ -350,10 +373,16 @@ class _PublishScreenState extends State<PublishScreen> {
                   maxLines: 3,
                   onChanged: (_) => _persistDraftSilently(),
                   style: const TextStyle(fontSize: 18),
-                  decoration: const InputDecoration(
-                    labelText: 'Detalles adicionales para tus vecinos',
-                    hintText: 'Indica punto público cercano o cómo pueden coordinar contigo.',
-                  ),
+                  decoration: _isProduct
+                      ? const InputDecoration(
+                          labelText: 'Descripción y precio del producto',
+                          hintText:
+                              'Ej. Precio: S/ 10. Entrega cerca del parque.',
+                        )
+                      : const InputDecoration(
+                          labelText: 'Detalles adicionales para tus vecinos',
+                          hintText: 'Indica punto público cercano o cómo pueden coordinar contigo.',
+                        ),
                 ),
                 if (_selectedKind == PublicationKind.servicio) ...[
                   const SizedBox(height: 14),
@@ -481,8 +510,10 @@ class _PublishScreenState extends State<PublishScreen> {
     required Key key,
     required PublicationKind kind,
     required String label,
+    String? category,
   }) {
-    final selected = _selectedKind == kind;
+    final chipCategory = category ?? _defaultCategoryForKind(kind);
+    final selected = _selectedKind == kind && _selectedCategory == chipCategory;
     return ChoiceChip(
       key: key,
       label: Padding(
@@ -510,9 +541,10 @@ class _PublishScreenState extends State<PublishScreen> {
                     districtUbigeo: _location!.districtUbigeo,
                   );
                 }
-                _selectedCategory = _defaultCategoryForKind(kind);
+                _selectedCategory = chipCategory;
                 widget.controller.setPublishPresetKind(kind);
               });
+              if (kind == PublicationKind.anuncio) _restoreExistingDraftIfAny();
             },
     );
   }
