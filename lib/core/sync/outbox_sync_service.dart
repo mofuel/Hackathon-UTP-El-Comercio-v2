@@ -42,6 +42,7 @@ class OutboxSyncService {
   Future<OutboxSyncSummary> syncPendingForUser(
     String activeUserId, {
     String? onlyOperationId,
+    String? onlyEntityId,
   }) async {
     if (activeUserId.trim().isEmpty) {
       return const OutboxSyncSummary(
@@ -70,11 +71,15 @@ class OutboxSyncService {
 
     try {
       final operations = await database.listOutboxForUser(activeUserId);
+      final selected = operations
+          .where((op) => op.operationId == onlyOperationId)
+          .firstOrNull;
       final blocked = <String>{};
       for (final op in operations) {
         if (!networkAvailable) break;
         if (blocked.contains(op.entityId)) continue;
-        if (onlyOperationId != null && op.operationId != onlyOperationId) {
+        if (onlyEntityId != null && op.entityId != onlyEntityId) continue;
+        if (onlyOperationId != null && op.entityId != selected?.entityId) {
           continue;
         }
         // Verificación defensiva de aislamiento entre cuentas
@@ -135,6 +140,7 @@ class OutboxSyncService {
             lastMsg = result.errorMessage;
             break;
         }
+        if (op.operationId == onlyOperationId) break;
       }
     } finally {
       _isSyncing = false;

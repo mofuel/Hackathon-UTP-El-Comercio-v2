@@ -9,6 +9,7 @@ import 'core/config/app_config.dart';
 import 'core/database/local_sqlite_database.dart';
 import 'core/notifications/push_notification_service.dart';
 import 'core/state/app_controller.dart';
+import 'core/sync/azure_remote_gateway.dart';
 import 'core/sync/outbox_sync_service.dart';
 import 'core/sync/supabase_remote_gateway.dart';
 import 'core/theme/app_theme.dart';
@@ -33,7 +34,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   unawaited(PushNotificationService.instance.initialize());
 
-  if (AppConfig.hasSupabaseCredentials) {
+  if (!AzureRemoteGateway.requested && AppConfig.hasSupabaseCredentials) {
     try {
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
@@ -49,7 +50,9 @@ Future<void> main() async {
   }
 
   final database = LocalSqliteDatabase();
-  final remoteGateway = SupabaseRemoteGateway();
+  final remoteGateway = AzureRemoteGateway.requested
+      ? AzureRemoteGateway()
+      : SupabaseRemoteGateway();
   final outboxSyncService = OutboxSyncService(
     database: database,
     remoteGateway: remoteGateway,

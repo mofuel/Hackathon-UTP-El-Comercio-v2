@@ -32,6 +32,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appAuthRedirectScheme"] = "pe.vecinos.app.entra"
     }
 
     buildTypes {

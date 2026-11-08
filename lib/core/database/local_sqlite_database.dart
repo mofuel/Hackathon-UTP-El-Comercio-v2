@@ -951,7 +951,7 @@ class LocalSqliteDatabase {
       await txn.upsert('profiles_local', 'id', profile.toSqlMap());
       if (queueSync) {
         final op = OutboxOperation(
-          operationId: 'profile-${profile.id}',
+          operationId: EntityId.create(),
           ownerUserId: profile.id,
           entityType: 'profile',
           entityId: profile.id,
@@ -1476,7 +1476,7 @@ class LocalSqliteDatabase {
       }
 
       final op = OutboxOperation(
-        operationId: rec.clientMutationId,
+        operationId: EntityId.create(),
         ownerUserId: userId,
         entityType: 'recommendation',
         entityId: rec.id,
@@ -1534,7 +1534,7 @@ class LocalSqliteDatabase {
 
       final now = DateTime.now().toUtc();
       final op = OutboxOperation(
-        operationId: 'del-${existing.clientMutationId}',
+        operationId: EntityId.create(),
         ownerUserId: userId,
         entityType: 'recommendation',
         entityId: existing.id,
@@ -1653,7 +1653,7 @@ class LocalSqliteDatabase {
       }
 
       final op = OutboxOperation(
-        operationId: offer.clientMutationId,
+        operationId: EntityId.create(),
         ownerUserId: helperId,
         entityType: 'help_offer',
         entityId: offer.id,

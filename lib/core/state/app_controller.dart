@@ -11,6 +11,7 @@ import '../models/entity_id.dart';
 import '../models/emergency_group_message.dart';
 import '../database/local_sqlite_database.dart';
 import '../models/domain_models.dart';
+import '../sync/azure_remote_gateway.dart';
 import '../sync/outbox_sync_service.dart';
 import '../sync/supabase_remote_gateway.dart';
 
@@ -96,6 +97,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   final LocalSqliteDatabase database;
   final SupabaseRemoteGateway remoteGateway;
+  bool get usesAzureBackend => remoteGateway is AzureRemoteGateway;
   final OutboxSyncService outboxSyncService;
 
   late final PeruLocationCatalog locationCatalog;
@@ -911,7 +913,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
     await outboxSyncService.syncPendingForUser(
       user.id,
-      onlyOperationId: rec.clientMutationId,
+      onlyEntityId: rec.id,
     );
     await refreshAllLocalData();
     return rec;
@@ -1101,15 +1103,18 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
     await outboxSyncService.syncPendingForUser(
       user.id,
-      onlyOperationId: offer.clientMutationId,
+      onlyEntityId: offer.id,
     );
 
     await refreshAllLocalData();
-    _statusBannerMessage = offer.syncStatus.isConfirmed
+    final synced = (await database.listOffersForPublication(publication.id))
+        .where((item) => item.id == offer.id)
+        .firstOrNull ?? offer;
+    _statusBannerMessage = synced.syncStatus.isConfirmed
         ? 'Oferta solidaria enviada y confirmada.'
-        : 'Sin conexión: tu oferta de ayuda se guardó en este teléfono (Pendiente de sincronizar).';
+        : 'Tu oferta sigue guardada en este teléfono, pendiente de confirmación.';
     notifyListeners();
-    return offer;
+    return synced;
   }
 
   /// Cambia el estado de una publicación propia (`abierta` -> `en_coordinacion` -> `resuelta` / `cancelada`).
@@ -1749,14 +1754,20 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Inicio de sesión y reanudación automática de intención pendiente.
-  Future<void> signIn({required String email, required String password}) async {
+  Future<void> signIn({required String email, required String password}) =>
+      _signInUsing(() => remoteGateway.signInAccount(email: email, password: password));
+
+  Future<void> signInWithEntra(String alias) {
+    final gateway = remoteGateway;
+    if (gateway is! AzureRemoteGateway) throw StateError('Entra no está configurado.');
+    return _signInUsing(() => gateway.signInHosted(alias));
+  }
+
+  Future<void> _signInUsing(Future<UserProfile> Function() authenticate) async {
     _authActionInProgress = true;
     final authEpoch = ++_authEpoch;
     try {
-      final remoteProfile = await remoteGateway.signInAccount(
-        email: email,
-        password: password,
-      );
+      final remoteProfile = await authenticate();
       final profile = await _preferPendingLocalProfile(remoteProfile);
       if (_disposed || authEpoch != _authEpoch || _passwordRecoveryPending) {
         throw StateError('La sesión cambió. Vuelve a intentarlo.');
