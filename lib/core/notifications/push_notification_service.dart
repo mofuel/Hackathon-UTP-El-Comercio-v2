@@ -65,6 +65,29 @@ final class PushNotificationService {
     if (await _messaging != null) yield* FirebaseMessaging.onMessage;
   }
 
+  Future<bool> unregisterInstallation() async {
+    final messaging = await _messaging;
+    if (messaging == null) return false;
+    final result = Completer<bool>();
+    final subscription = messaging.onUnregistered.listen(
+      (_) {
+        if (!result.isCompleted) result.complete(true);
+      },
+      onError: (Object _) {
+        if (!result.isCompleted) result.complete(false);
+      },
+    );
+    try {
+      await messaging.unregister().timeout(const Duration(seconds: 2));
+      return await result.future.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => false,
+      );
+    } finally {
+      await subscription.cancel();
+    }
+  }
+
   Stream<RemoteMessage> get openedMessages async* {
     if (await _messaging != null) yield* FirebaseMessaging.onMessageOpenedApp;
   }

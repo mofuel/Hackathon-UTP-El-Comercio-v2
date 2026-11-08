@@ -161,8 +161,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
           const SizedBox(height: 16),
           if (controller.currentUser case final user?
-              when !controller.usesAzureBackend &&
-                  controller.remoteGateway.isLiveSupabaseConnected &&
+              when controller.remoteGateway.isLiveSupabaseConnected &&
                   !controller.remoteGateway.isTestDouble)
             PrivateMessagePushSettings(
               key: ValueKey(user.id),

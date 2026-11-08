@@ -7,14 +7,16 @@ import pg from 'pg';
 import { decodeJwt } from 'jose';
 import { AppModule } from '../dist/app.module.js';
 import { ChatRealtime } from '../dist/chat-realtime.js';
+import { Database } from '../dist/database.js';
 import { EntraIdentity } from '../dist/entra-identity.js';
+import { FcmTransport, PrivatePushWorker } from '../dist/private-message-push.js';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('Configura DATABASE_URL.');
 const url = new URL(connectionString);
 if (url.hostname !== '127.0.0.1' || url.pathname !== '/conecta2_dev') throw new Error('Usa conecta2_dev local.');
 
-test('negociación Web PubSub restringida', async () => {
+test('negociación Web PubSub restringida y aviso FCM sin el texto del chat', async (t) => {
   const previous = process.env.WEB_PUBSUB_CONNECTION_STRING;
   const fakeKey = Buffer.alloc(32, 1).toString('base64');
   process.env.WEB_PUBSUB_CONNECTION_STRING = `Endpoint=https://test.webpubsub.azure.com;AccessKey=${fakeKey};Version=1.0;`;
@@ -34,11 +36,28 @@ test('negociación Web PubSub restringida', async () => {
   assert.ok(JSON.stringify(claims).includes('district-150121'));
   assert.doesNotMatch(JSON.stringify(claims), /webpubsub\.(joinLeaveGroup|sendToGroup)/);
 
+  const transport = new FcmTransport();
+  transport.account = { project: 'conecta2-test', auth: { getAccessToken: async () => ({ token: 'test-token' }) } };
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (endpoint, request) => {
+    assert.equal(endpoint, 'https://fcm.googleapis.com/v1/projects/conecta2-test/messages:send');
+    sent = JSON.parse(request.body).message;
+    return Response.json({ error: { details: [{ errorCode: 'UNREGISTERED' }] } }, { status: 404 });
+  });
+  const conversation = randomUUID();
+  const message = randomUUID();
+  assert.equal(await transport.send({ installation_id: 'installation-test', conversation_id: conversation,
+    message_id: message, recipient_id: user, expires_at: new Date(Date.now() + 3600000),
+    body: 'Contenido privado que no debe salir en el aviso' }), 'invalid');
+  assert.equal(sent.fid, 'installation-test');
+  assert.deepEqual(sent.notification, { title: 'Conecta2', body: 'Tienes un mensaje nuevo.' });
+  assert.deepEqual(sent.data, { type: 'private_message', recipient_id: user, conversation_id: conversation, message_id: message });
+  assert.doesNotMatch(JSON.stringify(sent), /Contenido privado/);
 });
 
-test('chats privados, grupos de emergencia respetan la cuenta', async (t) => {
-  const [author, neighbor, stranger, publication, otherPublication, emergency, thread] =
-    Array.from({ length: 7 }, randomUUID);
+test('chats privados, grupos de emergencia y cola de avisos respetan la cuenta', async (t) => {
+  const [author, neighbor, stranger, publication, otherPublication, emergency, thread, device, strangerDevice] =
+    Array.from({ length: 9 }, randomUUID);
   const actors = new Map([['Bearer autor', author], ['Bearer vecino', neighbor], ['Bearer tercero', stranger]]);
   const client = new pg.Client({ connectionString });
   await client.connect();
@@ -63,7 +82,14 @@ test('chats privados, grupos de emergencia respetan la cuenta', async (t) => {
     t.mock.method(realtime, 'privateChanged', async (users) => { privateSignals.push(users); });
     t.mock.method(realtime, 'groupChanged', async (district, owner) => { groupSignals.push([district, owner]); });
     t.mock.method(realtime, 'negotiate', async (actor, district) => ({ actor, district }));
+    const fcm = app.get(FcmTransport);
     await app.listen(0, '127.0.0.1');
+    t.mock.getter(fcm, 'available', () => true);
+    const received = [];
+    t.mock.method(fcm, 'send', async (job) => {
+      received.push(job);
+      return received.length === 1 ? 'retry' : 'sent';
+    });
     const endpoint = `${await app.getUrl()}/api/v1/chats`;
     const api = (path, account, method = 'GET', body) => fetch(`${endpoint}/${path}`, {
       method,
@@ -74,6 +100,8 @@ test('chats privados, grupos de emergencia respetan la cuenta', async (t) => {
 
     assert.equal((await api('negotiate')).status, 401);
     assert.deepEqual(await (await api('negotiate', 'vecino')).json(), { actor: neighbor, district: '150121' });
+    assert.equal((await api(`push/${device}`, 'autor', 'PUT', { installationId: 'installation-author' })).status, 200);
+    assert.equal((await api(`push/${strangerDevice}`, 'tercero', 'PUT', { installationId: 'installation-other' })).status, 200);
 
     const open = { id: thread, clientMutationId: randomUUID(), publicationId: publication };
     const opened = await Promise.all([api('threads', 'vecino', 'POST', open), api('threads', 'vecino', 'POST', open)]);
@@ -93,6 +121,21 @@ test('chats privados, grupos de emergencia respetan la cuenta', async (t) => {
     assert.equal((await (await api('threads', 'autor')).json()).conversations.length, 1);
     assert.equal(privateSignals.length, 2);
     assert.ok(privateSignals.every((users) => users.includes(author) && users.includes(neighbor) && !users.includes(stranger)));
+    const firstJob = await client.query('select * from public.private_message_push_queue where message_id=$1', [message.id]);
+    assert.equal(firstJob.rowCount, 1);
+    assert.equal(firstJob.rows[0].recipient_id, author);
+
+    const worker = app.get(PrivatePushWorker);
+    await Promise.all([worker.drain(), new PrivatePushWorker(app.get(Database), fcm).drain()]);
+    assert.equal(received.length, 1);
+    assert.equal(received[0].installation_id, 'installation-author');
+    assert.equal(received[0].conversation_id, thread);
+    assert.equal(received[0].body, undefined);
+    await client.query('update public.private_message_push_queue set available_at=now() where message_id=$1', [message.id]);
+    await worker.drain();
+    assert.equal(received.length, 2);
+    assert.equal((await client.query('select 1 from public.private_message_push_queue where message_id=$1', [message.id])).rowCount, 0);
+
     const group = `groups/${emergency}/messages`;
     const groupMessage = { id: randomUUID(), clientMutationId: randomUUID(), body: 'Mensaje del distrito' };
     assert.equal((await api(group, 'tercero', 'POST', groupMessage)).status, 404);
@@ -107,6 +150,12 @@ test('chats privados, grupos de emergencia respetan la cuenta', async (t) => {
     assert.equal((await api(group, 'vecino', 'POST', { ...groupMessage, id: randomUUID(), clientMutationId: randomUUID() })).status, 409);
     assert.equal((await (await api(group, 'vecino')).json()).messages.length, 1);
 
+    const nextMessage = { ...message, id: randomUUID(), clientMutationId: randomUUID() };
+    assert.equal((await api(path, 'vecino', 'POST', nextMessage)).status, 200);
+    await api(`push/${device}`, 'tercero', 'DELETE');
+    assert.equal((await client.query('select 1 from public.private_message_push_queue where message_id=$1', [nextMessage.id])).rowCount, 1);
+    await api(`push/${device}`, 'autor', 'DELETE');
+    assert.equal((await client.query('select 1 from public.private_message_push_queue where message_id=$1', [nextMessage.id])).rowCount, 0);
   } finally {
     try {
       await app?.close();

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../models/domain_models.dart';
 import '../models/emergency_group_message.dart';
+import '../notifications/push_notification_service.dart';
 import 'azure_chat_signals.dart';
 import 'entra_mobile_session.dart';
 import 'supabase_remote_gateway.dart';
@@ -13,6 +14,8 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
 
   final EntraMobileSession _session;
   late final _chatSignals = AzureChatSignals(_session);
+  Future<void> _pushWrites = Future.value();
+  bool _signingOut = false;
   static bool get requested => EntraMobileSession.apiUrl.isNotEmpty;
   static final _uuid = RegExp(
     r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$',
@@ -65,8 +68,32 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
 
   @override
   Future<void> signOutAccount() async {
+    _signingOut = true;
     _chatSignals.reset();
-    await _session.signOut();
+    try {
+      await _pushWrites;
+      final owner = _session.profile?.id;
+      if (owner != null && await _session.readPushOwner() == owner) {
+        try {
+          await _updatePrivateMessagePush(
+            owner,
+            null,
+          ).timeout(const Duration(seconds: 4));
+        } catch (_) {
+          if (await PushNotificationService.instance.unregisterInstallation()) {
+            await _session.setPushOwner(null);
+          }
+        }
+      }
+    } catch (_) {
+      // El cierre local debe continuar incluso cuando el teléfono está sin red.
+    } finally {
+      try {
+        await _session.signOut();
+      } finally {
+        _signingOut = false;
+      }
+    }
   }
 
   @override
@@ -324,11 +351,36 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
   Stream<void> watchChatActivity() => _chatSignals.events.map((_) {});
 
   @override
-  Future<bool> privateMessagePushEnabled() async => false;
+  Future<bool> privateMessagePushEnabled() async {
+    final device = await _session.pushDeviceId();
+    final response = await _session.request('GET', 'chats/push/$device');
+    return response['enabled'] == true;
+  }
 
   @override
-  Future<void> setPrivateMessagePush(String userId, String? installationId) async {
-    throw StateError('Los avisos de Azure todavía no están disponibles.');
+  Future<void> setPrivateMessagePush(String userId, String? installationId) {
+    if (_signingOut) throw StateError('La sesión cambió.');
+    final write = _pushWrites.then(
+      (_) => _updatePrivateMessagePush(userId, installationId),
+    );
+    _pushWrites = write.then((_) {}, onError: (Object _) {});
+    return write;
+  }
+
+  Future<void> _updatePrivateMessagePush(
+    String userId,
+    String? installationId,
+  ) async {
+    if (_session.profile?.id != userId) throw StateError('La sesión cambió.');
+    final device = await _session.pushDeviceId();
+    if (_session.profile?.id != userId) throw StateError('La sesión cambió.');
+    if (installationId != null) await _session.setPushOwner(userId);
+    await _session.request(
+      installationId == null ? 'DELETE' : 'PUT',
+      'chats/push/$device',
+      body: installationId == null ? null : {'installationId': installationId},
+    );
+    if (installationId == null) await _session.setPushOwner(null);
   }
 
   @override

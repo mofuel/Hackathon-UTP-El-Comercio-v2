@@ -56,8 +56,13 @@ La API recibe el contenido de SQLite en `POST /api/v1/publications/operations`, 
 
 Las pruebas de integración cubren creación repetida, lectura por otra cuenta, edición, conflicto, recomendaciones, ofertas y borrado lógico. El volcado de publicaciones y perfiles reales corresponde al ensayo y traspaso de datos.
 
-## Chats
+## Chats y avisos de mensajes
 
-`npm.cmd run db:migrate` aplica `004_conversations.sql`. La API conserva los hilos por vecino y consulta sus mensajes con paginación. Un grupo de emergencia admite al autor y a vecinos con el mismo UBIGEO. Cuando el reporte se resuelve o cancela, el grupo queda en lectura. Flutter conserva borradores privados y envía mensajes grupales pendientes al reconectar.
+`npm.cmd run db:migrate` aplica `004_conversations.sql` y `005_private_message_notifications.sql`. La API conserva los hilos por vecino y consulta sus mensajes con paginación. Un grupo de emergencia admite al autor y a vecinos con el mismo UBIGEO. Cuando el reporte se resuelve o cancela, el grupo queda en lectura. Flutter conserva borradores privados y envía mensajes grupales pendientes al reconectar.
 
 - **Web PubSub.** Configura `WEB_PUBSUB_CONNECTION_STRING` y, si quieres cambiar el nombre, `WEB_PUBSUB_HUB`. `GET /api/v1/chats/negotiate` emite una URL de conexión de cinco minutos para la cuenta autenticada. El socket solo avisa que hay cambios y la API HTTP comprueba los permisos al consultar el historial. Sin Web PubSub, las pantallas de chats se actualizan por HTTP cada 10 segundos. [SDK oficial de Web PubSub](https://learn.microsoft.com/azure/azure-web-pubsub/reference-server-sdk-js)
+- **Firebase.** Configura `FCM_SERVICE_ACCOUNT_JSON` como secreto del servidor con una cuenta autorizada para enviar FCM en el proyecto de la app. Configura los valores públicos de Firebase en Flutter y APNs para iOS según el README principal. Cada vecino activa los avisos en Chats en su propio teléfono. El servidor procesa la cola cada cinco segundos mientras está activo. En Azure, mantén al menos una réplica activa si ejecutas el trabajador dentro de la API. [Envíos de FCM por ID de instalación](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages)
+
+El aviso push dice «Tienes un mensaje nuevo» y abre el chat solo para su destinatario. La cola se crea en la misma transacción que el mensaje privado. El trabajador usa `SKIP LOCKED` y reintenta hasta cinco veces durante una hora. Si FCM informa que la instalación dejó de estar registrada, se elimina su asociación. Al cerrar sesión sin acceso a la API, la app intenta desregistrar la instalación en Firebase.
+
+Para la comprobación con servicios reales, configura el tenant externo de Entra, Web PubSub y FCM. Inicia sesión con dos cuentas. Envía un mensaje desde la primera con la segunda en primer plano, y repite con el teléfono destinatario en segundo plano. Toca el aviso y comprueba que abre la conversación. Con una tercera cuenta comprueba que el historial privado no es accesible. `npm.cmd run test:integration` cubre permisos, reintentos y cola local con transportes simulados.

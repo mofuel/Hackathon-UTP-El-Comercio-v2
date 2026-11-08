@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/domain_models.dart';
+import '../models/entity_id.dart';
 
 class AzureApiError implements Exception {
   const AzureApiError(this.status);
@@ -45,6 +46,25 @@ class EntraMobileSession {
 
   String get _storageKey =>
       'conecta2_entra:$_tenantId:$_mobileClientId:$apiUrl';
+
+  Future<String>? _pushDevice;
+  Future<String> pushDeviceId() => _pushDevice ??= _loadPushDevice();
+
+  Future<String> _loadPushDevice() async {
+    final key = '$_storageKey:pushDevice';
+    final current = await _storage.read(key: key);
+    if (current != null) return current;
+    final id = EntityId.create();
+    await _storage.write(key: key, value: id);
+    return id;
+  }
+
+  Future<String?> readPushOwner() =>
+      _storage.read(key: '$_storageKey:pushOwner');
+
+  Future<void> setPushOwner(String? owner) => owner == null
+      ? _storage.delete(key: '$_storageKey:pushOwner')
+      : _storage.write(key: '$_storageKey:pushOwner', value: owner);
 
   bool get configured {
     final url = Uri.tryParse(apiUrl);
