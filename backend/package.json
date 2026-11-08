@@ -1,0 +1,28 @@
+{
+  "name": "conecta2-backend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "db:ubigeo": "node --env-file-if-exists=.env scripts/import-ubigeo.mjs",
+    "test:integration": "node --env-file-if-exists=.env --test test/nearby.test.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "pg": "^8.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.0.0",
+    "typescript": "^5.9.0"
+  }
+}
