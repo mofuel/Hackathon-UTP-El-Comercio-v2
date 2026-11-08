@@ -18,7 +18,7 @@
 		</dict>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Con tu permiso, usamos una zona aproximada para mostrar servicios cercanos. También puedes elegir tu barrio manualmente.</string>
+	<string>Usamos tu ubicación para centrar el mapa y mostrar servicios cercanos. También puedes elegir tu barrio manualmente.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

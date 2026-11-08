@@ -94,6 +94,11 @@ class _NeighborhoodMapState extends State<NeighborhoodMap>
   int _tileEpoch = 0;
   Timer? _loadTimeout;
   static const _peru = LatLng(-9.19, -75.015);
+  double get _centerZoom => widget.center == null
+      ? 5
+      : widget.center == widget.privateLocation
+      ? 16
+      : 14;
   @override
   void initState() {
     super.initState();
@@ -109,8 +114,10 @@ class _NeighborhoodMapState extends State<NeighborhoodMap>
   @override
   void didUpdateWidget(covariant NeighborhoodMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.center != widget.center && _ready) {
-      _map.move(widget.center ?? _peru, widget.center == null ? 5 : 14);
+    if ((oldWidget.center != widget.center ||
+            oldWidget.privateLocation != widget.privateLocation) &&
+        _ready) {
+      _map.move(widget.center ?? _peru, _centerZoom);
     }
     if (oldWidget.online != widget.online) {
       _ready = false;
@@ -204,7 +211,7 @@ class _NeighborhoodMapState extends State<NeighborhoodMap>
                 mapController: _map,
                 options: MapOptions(
                   initialCenter: widget.center ?? _peru,
-                  initialZoom: widget.center == null ? 5 : 14,
+                  initialZoom: _centerZoom,
                   minZoom: 3,
                   maxZoom: 18,
                   onTap: (_, point) => widget.onSelectPoint?.call(point),

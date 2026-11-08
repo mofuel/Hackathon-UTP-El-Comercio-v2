@@ -25,6 +25,7 @@ import 'package:hackathon_utp_el_comercio/core/sync/outbox_sync_service.dart';
 import 'package:hackathon_utp_el_comercio/core/sync/supabase_remote_gateway.dart';
 import 'package:hackathon_utp_el_comercio/features/maps/explore_map_screen.dart';
 import 'package:hackathon_utp_el_comercio/features/maps/neighborhood_map.dart';
+import 'package:hackathon_utp_el_comercio/features/services/services_directory_screen.dart';
 import 'package:hackathon_utp_el_comercio/main.dart';
 
 final _png = base64Decode(
@@ -84,6 +85,61 @@ Future<AppController> app({
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(PeruLocationCatalog.load);
+
+  testWidgets(
+    'El directorio consulta cerca del GPS y centra el mapa con el punto privado',
+    (tester) async {
+      final remote = _MapGateway();
+      final c = await app(remote: remote);
+      addTearDown(c.dispose);
+      await c.updateLocationPreference(
+        neighborhood: 'Sin distrito',
+        sector: 'Sin sector',
+        approxLat: null,
+        approxLng: null,
+        useGpsApprox: false,
+      );
+      remote.connected = true;
+      c.updateServiceFilters(mapQuadrantView: true);
+      final location = _DirectoryLocation();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: c,
+              builder: (_, _) => ServicesDirectoryScreen(
+                controller: c,
+                locationService: location,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(location.reads, 0);
+      expect(remote.calls, 0);
+      expect(find.text('Registro remote-map'), findsNothing);
+
+      final button = find.byKey(const Key('btn_locate_service_map'));
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+
+      final map = tester.widget<NeighborhoodMap>(find.byType(NeighborhoodMap));
+      expect(map.center, _DirectoryLocation.point);
+      expect(map.privateLocation, _DirectoryLocation.point);
+      final result = map.records.singleWhere(
+        (record) => record.id == 'pub:remote-map',
+      );
+      expect(remote.lastOrigin, -12.076);
+      expect(c.currentUser!.approxLat, isNull);
+      expect(c.currentUser!.districtUbigeo, isNull);
+
+      c.openServiceDetail(result.publication!);
+      await c.refreshAllLocalData();
+      expect(c.selectedPublication?.id, 'remote-map');
+    },
+  );
 
   test('Configuración ausente, URL HTTPS y clave fuera de diagnósticos', () {
     expect(const CartoConfiguration(apiKey: '').isConfigured, isFalse);
@@ -697,6 +753,16 @@ class _MemoryTiles extends TileProvider {
   @override
   ImageProvider getImage(TileCoordinates coordinates, TileLayer options) =>
       MemoryImage(_png);
+}
+
+class _DirectoryLocation extends MapLocationService {
+  static const point = LatLng(-12.075932, -77.063108);
+  int reads = 0;
+  @override
+  Future<LatLng?> locatePrecise() async {
+    reads++;
+    return point;
+  }
 }
 
 class _NoLocation extends MapLocationService {
