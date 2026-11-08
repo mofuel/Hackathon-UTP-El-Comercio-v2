@@ -986,15 +986,9 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
         }),
       );
     }
-    await database.saveDraft(
-      FormDraft(
-        draftKey: 'chat_${thread.id}',
-        ownerUserId: user.id,
-        kind: publication.kind,
-        title: 'Mensaje de contacto',
-        description: cleanMessage,
-        updatedAt: DateTime.now().toUtc(),
-      ),
+    final draft = await _savePrivateDraft(
+      user.id, thread.id, cleanMessage,
+      kind: publication.kind, title: 'Mensaje de contacto', previous: previous,
     );
     await outboxSyncService.syncPendingForUser(
       user.id,
@@ -1004,16 +998,6 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
     // Regla del encargo: los mensajes de chat requieren conexión activa;
     // si está offline, no se fingen enviados y se conserva el texto como borrador.
     if (remoteGateway.simulateNetworkOffline) {
-      await database.saveDraft(
-        FormDraft(
-          draftKey: 'chat_${thread.id}',
-          ownerUserId: user.id,
-          kind: publication.kind,
-          title: 'Mensaje para ${publication.authorAlias}',
-          description: cleanMessage,
-          updatedAt: DateTime.now().toUtc(),
-        ),
-      );
       _selectedConversation = thread;
       await refreshAllLocalData();
       _statusBannerMessage = 'Sin conexión: la conversación quedó preparada y tu mensaje se guardó como borrador para enviarlo al reconectar.';
@@ -1027,8 +1011,7 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       publicationId: publication.id,
     );
 
-    final msgId = EntityId.create();
-    final msgMutationId = EntityId.create();
+    final (msgId, msgMutationId) = _privateMessageIds(draft);
 
     final message = await remoteGateway.sendRealtimeMessage(
       id: msgId,
@@ -1154,35 +1137,15 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       throw StateError('Escribe un mensaje antes de enviar.');
     }
 
+    final draft = await _savePrivateDraft(user.id, thread.id, clean);
     if (remoteGateway.simulateNetworkOffline) {
-      await database.saveDraft(
-        FormDraft(
-          draftKey: 'chat_${thread.id}',
-          ownerUserId: user.id,
-          kind: PublicationKind.servicio,
-          title: 'Borrador de chat con ${thread.publicationAuthorAlias}',
-          description: clean,
-          updatedAt: DateTime.now().toUtc(),
-        ),
-      );
       await refreshAllLocalData();
       throw StateError(
         'Los mensajes de chat requieren conexión activa y no se envían sin internet. Conservamos tu texto como borrador.',
       );
     }
 
-    await database.saveDraft(
-      FormDraft(
-        draftKey: 'chat_${thread.id}',
-        ownerUserId: user.id,
-        kind: PublicationKind.servicio,
-        title: 'Mensaje',
-        description: clean,
-        updatedAt: DateTime.now().toUtc(),
-      ),
-    );
-    final msgId = EntityId.create();
-    final mutId = EntityId.create();
+    final (msgId, mutId) = _privateMessageIds(draft);
 
     final message = await remoteGateway.sendRealtimeMessage(
       id: msgId,
@@ -1210,6 +1173,25 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
       draftKey: 'chat_${thread.id}',
     );
     await refreshAllLocalData();
+  }
+
+  Future<FormDraft> _savePrivateDraft(String owner, String thread, String body, {
+    PublicationKind kind = PublicationKind.servicio,
+    String title = 'Mensaje',
+    FormDraft? previous,
+  }) async {
+    final key = 'chat_$thread';
+    final current = previous ?? await database.getDraft(ownerUserId: owner, draftKey: key);
+    if (current != null && current.description.trim() == body) return current;
+    final draft = FormDraft(draftKey: key, ownerUserId: owner, kind: kind,
+      title: title, description: body, updatedAt: DateTime.now().toUtc());
+    await database.saveDraft(draft);
+    return draft;
+  }
+
+  (String, String) _privateMessageIds(FormDraft draft) {
+    final key = '${draft.ownerUserId}:${draft.draftKey}:${draft.updatedAt.microsecondsSinceEpoch}';
+    return (EntityId.forContext('message:$key'), EntityId.forContext('message-mutation:$key'));
   }
 
   Future<void> openEmergencyGroup(Publication publication) async {

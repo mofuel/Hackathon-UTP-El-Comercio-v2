@@ -1,14 +1,18 @@
+import 'dart:async';
+
 import '../models/domain_models.dart';
 import '../models/emergency_group_message.dart';
+import 'azure_chat_signals.dart';
 import 'entra_mobile_session.dart';
 import 'supabase_remote_gateway.dart';
 
-/// Adapter for the publication flows while the chat migration is still pending.
+/// Conecta las publicaciones, los chats y los avisos con la API de Conecta2.
 class AzureRemoteGateway extends SupabaseRemoteGateway {
   AzureRemoteGateway({EntraMobileSession? session})
     : _session = session ?? EntraMobileSession();
 
   final EntraMobileSession _session;
+  late final _chatSignals = AzureChatSignals(_session);
   static bool get requested => EntraMobileSession.apiUrl.isNotEmpty;
   static final _uuid = RegExp(
     r'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$',
@@ -60,7 +64,10 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
   }
 
   @override
-  Future<void> signOutAccount() => _session.signOut();
+  Future<void> signOutAccount() async {
+    _chatSignals.reset();
+    await _session.signOut();
+  }
 
   @override
   Future<RemoteSyncResult> pushOutboxOperation(
@@ -80,6 +87,8 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
       'recommendation',
       'help_offer',
       'profile',
+      'conversation',
+      'emergency_group_message',
     }.contains(operation.entityType)) {
       return pending;
     }
@@ -87,6 +96,32 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
     if (!guest && _session.profile?.id != operation.ownerUserId) return pending;
 
     try {
+      if (operation.entityType == 'conversation' ||
+          operation.entityType == 'emergency_group_message') {
+        final payload = operation.decodePayload();
+        if (guest) return pending;
+        if (operation.entityType == 'conversation') {
+          await ensureNeighborConversation(
+            id: payload['id'] as String,
+            mutationId: payload['client_mutation_id'] as String,
+            publicationId: payload['publication_id'] as String,
+          );
+        } else {
+          final publication = Uri.encodeComponent(
+            payload['publication_id'] as String,
+          );
+          await _session.request(
+            'POST',
+            'chats/groups/$publication/messages',
+            body: {
+              'id': payload['id'],
+              'clientMutationId': payload['client_mutation_id'],
+              'body': payload['body'],
+            },
+          );
+        }
+        return const RemoteSyncResult(status: SyncStatus.confirmado);
+      }
       final result = await _session.request(
         'POST',
         'publications/operations',
@@ -264,43 +299,172 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
   }
 
   @override
-  Future<List<Map<String, Object?>>> fetchConversationList() async => const [];
+  Future<List<Map<String, Object?>>> fetchConversationList() async =>
+      _rows((await _session.request('GET', 'chats/threads'))['conversations']);
+
   @override
-  Future<Map<String, DateTime>> fetchChatActivity(List<String> groups) async =>
-      const {};
+  Future<Map<String, DateTime>> fetchChatActivity(List<String> groups) async {
+    final ids = groups.where(_uuid.hasMatch).toList();
+    final result = <String, DateTime>{};
+    for (var i = 0; i < ids.length || i == 0; i += 100) {
+      final response = await _session.request(
+        'POST',
+        'chats/activity',
+        body: {'groups': ids.skip(i).take(100).toList()},
+      );
+      final activity = Map<String, String>.from(response['activity'] as Map);
+      result.addAll(
+        activity.map((key, value) => MapEntry(key, DateTime.parse(value))),
+      );
+    }
+    return result;
+  }
+
   @override
-  Stream<void> watchChatActivity() => const Stream.empty();
+  Stream<void> watchChatActivity() => _chatSignals.events.map((_) {});
+
   @override
   Future<bool> privateMessagePushEnabled() async => false;
+
   @override
-  Future<void> setPrivateMessagePush(
-    String userId,
-    String? installationId,
-  ) async => _chatUnavailable();
+  Future<void> setPrivateMessagePush(String userId, String? installationId) async {
+    throw StateError('Los avisos de Azure todavía no están disponibles.');
+  }
+
   @override
   Future<ConversationThread?> fetchPrivateConversation(
     String conversationId,
-  ) async => null;
+  ) async {
+    try {
+      return ConversationThread.fromSqlMap(
+        await _session.request(
+          'GET',
+          'chats/threads/${Uri.encodeComponent(conversationId)}',
+        ),
+      );
+    } on AzureApiError catch (error) {
+      if (error.status == 404) return null;
+      rethrow;
+    }
+  }
+
   @override
   Future<List<EmergencyGroupMessage>> fetchEmergencyGroupMessages(
     String publicationId, {
     DateTime? beforeTime,
     String? beforeId,
-  }) async => const [];
+  }) async {
+    final response = await _session.request(
+      'GET',
+      'chats/groups/${Uri.encodeComponent(publicationId)}/messages',
+      query: _page(beforeTime, beforeId),
+    );
+    return _rows(response['messages'])
+        .map(EmergencyGroupMessage.fromMap)
+        .toList();
+  }
+
+  Map<String, String> _page(DateTime? time, String? id) => {
+    if (time != null && id != null) ...{
+      'beforeTime': time.toUtc().toIso8601String(),
+      'beforeId': id,
+    },
+  };
+
   @override
-  Stream<void> watchEmergencyGroup(String publicationId) =>
-      const Stream.empty();
+  Stream<void> watchEmergencyGroup(String publicationId) => _chatSignals.events
+      .where((event) => event != 'private_changed')
+      .map((_) {});
+
   @override
   Stream<ChatMessage> watchConversationMessages(
     String conversationId, {
     String? peerId,
-  }) => const Stream.empty();
+  }) {
+    final owner = _session.profile?.id;
+    if (owner == null) return const Stream.empty();
+    late StreamController<ChatMessage> output;
+    StreamSubscription<String>? signals;
+    Timer? timer;
+    final seen = <String>{};
+    var busy = false, cancelled = false;
+    bool active() => !cancelled && _session.profile?.id == owner;
+
+    Future<void> refresh() async {
+      if (!active() || busy || simulateNetworkOffline) return;
+      busy = true;
+      try {
+        DateTime? before;
+        String? beforeId;
+        while (active()) {
+          final response = await _session.request(
+            'GET',
+            'chats/threads/${Uri.encodeComponent(conversationId)}/messages',
+            query: {..._page(before, beforeId), 'peerId': ?peerId},
+          );
+          if (!active()) return;
+          final rows = _rows(response['messages']);
+          var foundSeen = false;
+          for (final row in rows) {
+            if (!seen.add(row['id'] as String)) {
+              foundSeen = true;
+            } else {
+              output.add(
+                ChatMessage.fromSqlMap({
+                  ...row,
+                  'conversation_id': conversationId,
+                }),
+              );
+            }
+          }
+          if (rows.length < 100 || foundSeen) break;
+          before = DateTime.parse(rows.last['created_at'] as String);
+          beforeId = rows.last['id'] as String;
+        }
+      } catch (error) {
+        if (active()) output.addError(error);
+      } finally {
+        busy = false;
+      }
+    }
+
+    output = StreamController<ChatMessage>(
+      onListen: () {
+        signals = _chatSignals.events
+            .where((event) => event != 'groups_changed')
+            .listen((_) => unawaited(refresh()));
+        timer = Timer.periodic(
+          const Duration(seconds: 10),
+          (_) => unawaited(refresh()),
+        );
+        unawaited(refresh());
+      },
+      onCancel: () async {
+        cancelled = true;
+        timer?.cancel();
+        await signals?.cancel();
+      },
+    );
+    return output.stream;
+  }
+
   @override
   Future<void> ensureNeighborConversation({
     required String id,
     required String mutationId,
     required String publicationId,
-  }) async => _chatUnavailable();
+  }) async {
+    await _session.request(
+      'POST',
+      'chats/threads',
+      body: {
+        'id': id,
+        'clientMutationId': mutationId,
+        'publicationId': publicationId,
+      },
+    );
+  }
+
   @override
   Future<ChatMessage> sendRealtimeMessage({
     required String id,
@@ -310,9 +474,23 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
     required String senderId,
     required String senderAlias,
     required String body,
-  }) async => _chatUnavailable();
-
-  Never _chatUnavailable() => throw StateError(
-    'Los chats de Azure estarán disponibles en la siguiente etapa.',
-  );
+  }) async {
+    if (simulateNetworkOffline || _session.profile?.id != senderId) {
+      throw StateError('El mensaje sigue guardado como borrador.');
+    }
+    final response = await _session.request(
+      'POST',
+      'chats/threads/${Uri.encodeComponent(conversationId)}/messages',
+      body: {
+        'id': id,
+        'clientMutationId': clientMutationId,
+        'recipientId': recipientId,
+        'body': body,
+      },
+    );
+    return ChatMessage.fromSqlMap({
+      ...response,
+      'conversation_id': conversationId,
+    });
+  }
 }

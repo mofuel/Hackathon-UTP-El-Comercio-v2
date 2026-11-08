@@ -128,7 +128,7 @@ class _FavorDetailScreenState extends State<FavorDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           PublicationOwnerActions(controller: c, publication: fav),
-          if (fav.kind.isEmergency && !c.usesAzureBackend) ...[
+          if (fav.kind.isEmergency) ...[
             FilledButton.icon(
               key: const Key('open_emergency_group'),
               onPressed: () async {
@@ -381,7 +381,7 @@ class _FavorDetailScreenState extends State<FavorDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  if (!c.usesAzureBackend) OutlinedButton.icon(
+                  OutlinedButton.icon(
                     key: const Key('btn_favor_open_private_chat'),
                     onPressed: () => c.requestContactWithProvider(
                       publication: fav,

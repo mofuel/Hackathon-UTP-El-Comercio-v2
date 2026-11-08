@@ -25,6 +25,7 @@ dependencies:
   firebase_messaging: ^17.0.1
   flutter_appauth: ^13.0.0
   flutter_secure_storage: ^11.2.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

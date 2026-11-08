@@ -54,4 +54,10 @@ Con `CONECTA2_API_URL` configurada, la app usa el acceso alojado por Entra. La c
 
 La API recibe el contenido de SQLite en `POST /api/v1/publications/operations`, guarda cada resultado en la misma transacción que su cambio y responde `409` si la versión quedó obsoleta o se reutiliza un identificador con datos distintos. El feed, las búsquedas, los recursos y las actualizaciones de avisos requieren sesión. El reporte de emergencia invitado usa la misma ruta de operaciones y tiene un límite por IP. El límite local usa la IP directa de la conexión. Configura proxies de confianza antes de publicarlo detrás de un proxy.
 
-Las pruebas de integración cubren creación repetida, lectura por otra cuenta, edición, conflicto, recomendaciones, ofertas y borrado lógico. El backend de chats corresponde al paso 4. El volcado de publicaciones y perfiles reales corresponde al ensayo y traspaso de datos.
+Las pruebas de integración cubren creación repetida, lectura por otra cuenta, edición, conflicto, recomendaciones, ofertas y borrado lógico. El volcado de publicaciones y perfiles reales corresponde al ensayo y traspaso de datos.
+
+## Chats
+
+`npm.cmd run db:migrate` aplica `004_conversations.sql`. La API conserva los hilos por vecino y consulta sus mensajes con paginación. Un grupo de emergencia admite al autor y a vecinos con el mismo UBIGEO. Cuando el reporte se resuelve o cancela, el grupo queda en lectura. Flutter conserva borradores privados y envía mensajes grupales pendientes al reconectar.
+
+- **Web PubSub.** Configura `WEB_PUBSUB_CONNECTION_STRING` y, si quieres cambiar el nombre, `WEB_PUBSUB_HUB`. `GET /api/v1/chats/negotiate` emite una URL de conexión de cinco minutos para la cuenta autenticada. El socket solo avisa que hay cambios y la API HTTP comprueba los permisos al consultar el historial. Sin Web PubSub, las pantallas de chats se actualizan por HTTP cada 10 segundos. [SDK oficial de Web PubSub](https://learn.microsoft.com/azure/azure-web-pubsub/reference-server-sdk-js)

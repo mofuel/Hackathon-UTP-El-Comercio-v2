@@ -113,9 +113,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (controller.usesAzureBackend) {
-      return const Center(child: Text('Los chats estarán disponibles en la siguiente etapa.'));
-    }
     final entries = [
       for (final t in controller.userConversations)
         (
@@ -164,7 +161,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ),
           const SizedBox(height: 16),
           if (controller.currentUser case final user?
-              when controller.remoteGateway.isLiveSupabaseConnected &&
+              when !controller.usesAzureBackend &&
+                  controller.remoteGateway.isLiveSupabaseConnected &&
                   !controller.remoteGateway.isTestDouble)
             PrivateMessagePushSettings(
               key: ValueKey(user.id),

@@ -296,7 +296,7 @@ class _ServiceDetailScreenState extends State<ServiceDetailScreen> {
           const SizedBox(height: 16),
 
           // Bloque 1: Solicitar contacto con prestador (Clic 3 desde Inicio)
-          if (!c.usesAzureBackend) Container(
+          Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: AppTheme.surfaceCard,
