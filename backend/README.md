@@ -45,3 +45,13 @@ Con un token de acceso emitido para la API, envíalo en `Authorization: Bearer �
 La identidad se vincula por emisor y `oid` de Entra. Para trasladar una cuenta existente, enlaza el `oid` verificado a su UUID de perfil antes de habilitar la nueva app. El correo no se usa para vincular cuentas. La prueba de integración usa dos identidades firmadas localmente y comprueba también firma inválida, expiración, audiencia, aislamiento y alta concurrente.
 
 Referencias de Microsoft para [crear un tenant externo](https://learn.microsoft.com/en-us/entra/external-id/customers/quickstart-tenant-setup), [exponer permisos de una API](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-configure-app-expose-web-apis) y [habilitar la recuperación de contraseña](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-enable-password-reset-customers).
+
+## Publicaciones y sincronización
+
+Ejecuta `npm.cmd run db:migrate` para aplicar `003_publication_actions.sql`. Desde la raíz Flutter, configura `CONECTA2_API_URL` y las cuatro variables públicas de Entra en un archivo de `--dart-define-from-file`. Registra `pe.vecinos.app.entra://oauth/callback` como URI de retorno personalizada en la plataforma **Aplicaciones móviles y de escritorio** del cliente público. El emulador Android de desarrollo puede usar `http://10.0.2.2:3000`. Para un dispositivo usa una API alcanzable por HTTPS. [Configuración de la URI de retorno en Entra](https://learn.microsoft.com/entra/identity-platform/how-to-add-redirect-uri)
+
+Con `CONECTA2_API_URL` configurada, la app usa el acceso alojado por Entra. La cuenta obtiene su UUID de `/api/v1/me`. Registra la vinculación de los perfiles importados antes de que sus usuarios entren, para conservar su UUID y la cola local asociada.
+
+La API recibe el contenido de SQLite en `POST /api/v1/publications/operations`, guarda cada resultado en la misma transacción que su cambio y responde `409` si la versión quedó obsoleta o se reutiliza un identificador con datos distintos. El feed, las búsquedas, los recursos y las actualizaciones de avisos requieren sesión. El reporte de emergencia invitado usa la misma ruta de operaciones y tiene un límite por IP. El límite local usa la IP directa de la conexión. Configura proxies de confianza antes de publicarlo detrás de un proxy.
+
+Las pruebas de integración cubren creación repetida, lectura por otra cuenta, edición, conflicto, recomendaciones, ofertas y borrado lógico. El backend de chats corresponde al paso 4. El volcado de publicaciones y perfiles reales corresponde al ensayo y traspaso de datos.

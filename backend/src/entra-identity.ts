@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { Database } from './database';
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const tenantName = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
@@ -11,6 +12,8 @@ interface Issuer {
 
 @Injectable()
 export class EntraIdentity {
+  constructor(private readonly database: Database) {}
+
   private readonly subdomain = process.env.ENTRA_TENANT_SUBDOMAIN ?? '';
   private readonly tenantId = (process.env.ENTRA_TENANT_ID ?? '').toLowerCase();
   private readonly audience = (process.env.ENTRA_API_CLIENT_ID ?? '').toLowerCase();
@@ -45,6 +48,16 @@ export class EntraIdentity {
     }
 
     return { issuer, subject: payload.oid.toLowerCase() };
+  }
+
+  async requireProfileId(authorization: string | undefined): Promise<string> {
+    const { issuer, subject } = await this.requireUser(authorization);
+    const { rows: [profile] } = await this.database.pool.query(
+      'select profile_id from public.profile_identities where issuer = $1 and subject = $2',
+      [issuer, subject],
+    );
+    if (!profile) throw new ForbiddenException('Completa tu perfil de Conecta2.');
+    return profile.profile_id;
   }
 
   private getIssuer() {
