@@ -35,8 +35,8 @@ Las ubicaciones de perfiles y solicitudes se redondean a tres decimales. Un serv
 Se ha comprobado con Flutter 3.47.9 y Dart 3.13.7. Para Android se necesita el Android SDK; para iOS, macOS y Xcode.
 
 ```sh
-git clone https://github.com/itslevanx/Hackathon-UTP-El-Comercio.git
-cd Hackathon-UTP-El-Comercio
+git clone https://github.com/mofuel/Hackathon-UTP-El-Comercio-v2.git
+cd Hackathon-UTP-El-Comercio-v2
 flutter pub get
 ```
 
@@ -66,6 +66,19 @@ open ios/Runner.xcworkspace
 Vuelve a ejecutar el script si cambias `.env.local.json`. Genera `.env.ios.xcconfig`, ignorado por Git; no copies sus valores al proyecto ni al esquema de Xcode. Esta configuración se conserva al ejecutar `flutter pub get`. Si compilas desde Flutter con `--dart-define-from-file`, prevalecen los parámetros de ese comando.
 
 Sin configuración remota, los simulacros siguen disponibles. La app no crea sesiones ficticias ni presenta envíos locales como confirmados.
+
+## Integración y entrega de Flutter
+
+GitHub Actions analiza Flutter y ejecuta sus pruebas en cada pull request hacia `main`. Cada envío a `main` o `mofuel` que pasa los controles genera un APK de vista previa en **Actions → Flutter Android → ejecución → Artifacts**. Descarga el ZIP, extráelo e instala `app-debug.apk` en Android.
+
+En **Settings → Secrets and variables → Actions**, se pueden agregar estos secretos del repositorio:
+
+| Secreto | Configuración |
+| --- | --- |
+| `CONECTA2_FLUTTER_CONFIG_JSON` | Contenido JSON con los valores públicos del cliente. Usa `SUPABASE_URL` y `SUPABASE_ANON_KEY` para Supabase, o `CONECTA2_API_URL` y las cuatro variables de Entra documentadas en [el backend](backend/README.md). Sin esta configuración se genera un APK de vista previa sin conexión a un backend. Incluye solo valores que pueden quedar visibles dentro del APK. |
+| `ANDROID_PREVIEW_KEYSTORE_B64` | Base64 de un `debug.keystore` dedicado a las vistas previas, con el alias y las contraseñas estándar de Android Debug. Conserva la misma clave entre ejecuciones para actualizar la app instalada. La primera instalación puede requerir desinstalar la copia anterior si estaba firmada con otra clave. |
+
+El APK de vista previa se distribuye desde Actions. Play Store y TestFlight requieren configurar la firma de distribución y las credenciales de sus respectivas plataformas.
 
 ## Notificaciones móviles
 
