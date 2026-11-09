@@ -5,9 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/app_config.dart';
 import '../models/domain_models.dart';
 import '../models/entity_id.dart';
+
+part 'supabase_azure_session.dart';
 
 class AzureApiError implements Exception {
   const AzureApiError(this.status);
@@ -66,7 +70,7 @@ class EntraMobileSession {
       ? _storage.delete(key: '$_storageKey:pushOwner')
       : _storage.write(key: '$_storageKey:pushOwner', value: owner);
 
-  bool get configured {
+  bool get _apiConfigured {
     final url = Uri.tryParse(apiUrl);
     return url != null &&
         url.host.isNotEmpty &&
@@ -80,12 +84,15 @@ class EntraMobileSession {
                   '127.0.0.1',
                   'localhost',
                   '10.0.2.2',
-                ].contains(url.host))) &&
-        _subdomain.isNotEmpty &&
-        _tenantId.isNotEmpty &&
-        _apiClientId.isNotEmpty &&
-        _mobileClientId.isNotEmpty;
+                ].contains(url.host)));
   }
+
+  bool get configured =>
+      _apiConfigured &&
+      _subdomain.isNotEmpty &&
+      _tenantId.isNotEmpty &&
+      _apiClientId.isNotEmpty &&
+      _mobileClientId.isNotEmpty;
 
   Future<UserProfile> signIn(String alias) async {
     if (!configured) {

@@ -97,7 +97,10 @@ class AppController extends ChangeNotifier with WidgetsBindingObserver {
 
   final LocalSqliteDatabase database;
   final SupabaseRemoteGateway remoteGateway;
-  bool get usesAzureBackend => remoteGateway is AzureRemoteGateway;
+  bool get usesHostedSignIn => switch (remoteGateway) {
+    AzureRemoteGateway gateway => gateway.usesHostedSignIn,
+    _ => false,
+  };
   final OutboxSyncService outboxSyncService;
 
   late final PeruLocationCatalog locationCatalog;

@@ -62,15 +62,16 @@ jobs:
               raise SystemExit('CONECTA2_FLUTTER_CONFIG_JSON debe contener JSON válido.') from None
           if not isinstance(config, dict):
               raise SystemExit('CONECTA2_FLUTTER_CONFIG_JSON debe ser un objeto JSON.')
-          if config.get('CONECTA2_API_URL'):
+          has_supabase = bool(config.get('SUPABASE_URL')) and bool(config.get('SUPABASE_ANON_KEY'))
+          if bool(config.get('SUPABASE_URL')) != bool(config.get('SUPABASE_ANON_KEY')):
+              raise SystemExit('Supabase requiere SUPABASE_URL y SUPABASE_ANON_KEY.')
+          if config.get('CONECTA2_API_URL') and not has_supabase:
               required = ('ENTRA_TENANT_SUBDOMAIN', 'ENTRA_TENANT_ID',
                           'ENTRA_API_CLIENT_ID', 'ENTRA_MOBILE_CLIENT_ID')
               missing = [key for key in required if not config.get(key)]
               if missing:
                   raise SystemExit('Faltan valores de Entra: ' + ', '.join(missing))
-          elif bool(config.get('SUPABASE_URL')) != bool(config.get('SUPABASE_ANON_KEY')):
-              raise SystemExit('Supabase requiere SUPABASE_URL y SUPABASE_ANON_KEY.')
-          elif not config.get('SUPABASE_URL'):
+          elif not config.get('CONECTA2_API_URL') and not has_supabase:
               print('::notice::El APK se compilará sin conexión a un backend.')
 
           Path(os.environ['RUNNER_TEMP'], 'conecta2-flutter.json').write_text(

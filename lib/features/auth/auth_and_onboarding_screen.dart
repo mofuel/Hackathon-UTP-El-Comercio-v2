@@ -179,7 +179,7 @@ class _AuthAndOnboardingScreenState extends State<AuthAndOnboardingScreen> {
       _submitting = true;
     });
     try {
-      if (widget.controller.usesAzureBackend) {
+      if (widget.controller.usesHostedSignIn) {
         await widget.controller.signInWithEntra(_aliasController.text);
       } else if (_requestRecovery) {
         if (_recoveryEmailSent) return;
@@ -489,7 +489,7 @@ class _AuthAndOnboardingScreenState extends State<AuthAndOnboardingScreen> {
             ),
           ),
 
-          if (user == null && c.usesAzureBackend) ...[
+          if (user == null && c.usesHostedSignIn) ...[
             const SizedBox(height: 16),
             const Text('Inicia sesión, crea tu cuenta o recupera tu contraseña en el acceso seguro.'),
             const SizedBox(height: 12),
@@ -505,7 +505,7 @@ class _AuthAndOnboardingScreenState extends State<AuthAndOnboardingScreen> {
               label: Text(_submitting ? 'Conectando…' : 'Continuar al acceso seguro'),
             ),
           ],
-          if (user == null && !c.usesAzureBackend) ...[
+          if (user == null && !c.usesHostedSignIn) ...[
             const SizedBox(height: 16),
 
             Container(

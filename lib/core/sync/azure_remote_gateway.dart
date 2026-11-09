@@ -13,6 +13,7 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
     : _session = session ?? EntraMobileSession();
 
   final EntraMobileSession _session;
+  bool get usesHostedSignIn => _session is! SupabaseAzureSession;
   late final _chatSignals = AzureChatSignals(_session);
   Future<void> _pushWrites = Future.value();
   bool _signingOut = false;
@@ -25,11 +26,14 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
   @override
   bool get isLiveSupabaseConnected => _session.configured;
   @override
-  Stream<void> get signedInSessionChanges => const Stream.empty();
+  Stream<void> get signedInSessionChanges =>
+      usesHostedSignIn ? const Stream.empty() : super.signedInSessionChanges;
   @override
-  Stream<void> get passwordRecoveryChanges => const Stream.empty();
+  Stream<void> get passwordRecoveryChanges =>
+      usesHostedSignIn ? const Stream.empty() : super.passwordRecoveryChanges;
   @override
-  bool get hasPasswordRecoverySession => false;
+  bool get hasPasswordRecoverySession =>
+      !usesHostedSignIn && super.hasPasswordRecoverySession;
 
   Future<UserProfile> signInHosted(String alias) => _session.signIn(alias);
 
@@ -37,7 +41,9 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
   Future<UserProfile> signInAccount({
     required String email,
     required String password,
-  }) => signInHosted('');
+  }) => _session is SupabaseAzureSession
+      ? _session.signInWithPassword(email, password)
+      : signInHosted('');
 
   @override
   Future<UserProfile> registerAccount({
@@ -50,14 +56,31 @@ class AzureRemoteGateway extends SupabaseRemoteGateway {
     required double? approxLng,
     required bool useGpsApprox,
     String? districtUbigeo,
-  }) => signInHosted(alias);
+  }) async {
+    if (_session is! SupabaseAzureSession) return signInHosted(alias);
+    final profile = await _session.registerWithPassword(email, password, alias);
+    return profile.copyWith(
+      neighborhood: neighborhood,
+      sector: sector,
+      districtUbigeo: districtUbigeo,
+      approxLat: approxLat,
+      approxLng: approxLng,
+      useGpsApprox: useGpsApprox,
+      updatedAt: DateTime.now().toUtc(),
+    );
+  }
 
   @override
-  Future<void> requestPasswordReset(String email) async =>
-      throw StateError('Usa «Olvidé mi contraseña» en el acceso seguro.');
+  Future<void> requestPasswordReset(String email) async {
+    if (!usesHostedSignIn) return super.requestPasswordReset(email);
+    throw StateError('Usa «Olvidé mi contraseña» en el acceso seguro.');
+  }
+
   @override
-  Future<void> updateRecoveredPassword(String password) async =>
-      throw StateError('Completa la recuperación en el acceso seguro.');
+  Future<void> updateRecoveredPassword(String password) async {
+    if (!usesHostedSignIn) return super.updateRecoveredPassword(password);
+    throw StateError('Completa la recuperación en el acceso seguro.');
+  }
 
   @override
   Future<UserProfile?> getCurrentSessionProfile() async {

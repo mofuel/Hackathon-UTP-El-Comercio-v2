@@ -75,7 +75,7 @@ En **Settings → Secrets and variables → Actions**, se pueden agregar estos s
 
 | Secreto | Configuración |
 | --- | --- |
-| `CONECTA2_FLUTTER_CONFIG_JSON` | Contenido JSON con los valores públicos del cliente. Usa `SUPABASE_URL` y `SUPABASE_ANON_KEY` para Supabase, o `CONECTA2_API_URL` y las cuatro variables de Entra documentadas en [el backend](backend/README.md). Sin esta configuración se genera un APK de vista previa sin conexión a un backend. Incluye solo valores que pueden quedar visibles dentro del APK. |
+| `CONECTA2_FLUTTER_CONFIG_JSON` | Contenido JSON con los valores públicos del cliente. Configura `CONECTA2_API_URL`, `SUPABASE_URL` y `SUPABASE_ANON_KEY` para iniciar sesión con Supabase Auth y usar Azure para los datos. Sin `CONECTA2_API_URL`, se usa el backend de Supabase. Azure también admite el acceso de Entra descrito en [el backend](backend/README.md). Incluye solo valores que pueden quedar visibles dentro del APK. |
 | `ANDROID_PREVIEW_KEYSTORE_B64` | Base64 de un `debug.keystore` dedicado a las vistas previas, con el alias y las contraseñas estándar de Android Debug. Conserva la misma clave entre ejecuciones para actualizar la app instalada. La primera instalación puede requerir desinstalar la copia anterior si estaba firmada con otra clave. |
 
 El APK de vista previa se distribuye desde Actions. Play Store y TestFlight requieren configurar la firma de distribución y las credenciales de sus respectivas plataformas.
