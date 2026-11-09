@@ -31,7 +31,9 @@ Detén PostgreSQL con `docker compose stop`. Los datos de desarrollo quedan en e
 
 ## Identidad y perfiles
 
-El paso 2 requiere un tenant **externo de clientes** de Microsoft Entra External ID. En ese tenant registra una API y un cliente público separado para la app móvil.
+Para conservar el inicio de sesión actual, configura `SUPABASE_AUTH_URL` y `SUPABASE_AUTH_PUBLIC_KEY` en la API de Azure. En Flutter, configura `CONECTA2_API_URL`, `SUPABASE_URL` y `SUPABASE_ANON_KEY`. La API valida la sesión con Supabase Auth y usa el UUID de la cuenta para recuperar su perfil de PostgreSQL en Azure. Las publicaciones, recomendaciones y chats pasan por la API de Azure.
+
+Para usar Microsoft Entra External ID, el paso 2 requiere un tenant **externo de clientes**. En ese tenant registra una API y un cliente público separado para la app móvil.
 
 1. En la aplicación de la API, configura la versión de token de acceso `2`, expón el permiso delegado `access_as_user` y conserva el identificador de aplicación de la API.
 2. En el cliente público, configura la URI de retorno de la app y añade el permiso delegado de la API. Asocia el cliente al flujo de registro e inicio de sesión con correo y contraseña. El cliente usa código de autorización con PKCE y solicita el scope `api://<id-de-la-api>/access_as_user` si conservas el URI de aplicación predeterminado.

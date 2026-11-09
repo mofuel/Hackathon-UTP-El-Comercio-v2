@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, NotFoundException, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Put } from '@nestjs/common';
 import { Database } from './database';
 import { EntraIdentity } from './entra-identity';
 
@@ -8,13 +8,15 @@ export class ProfileController {
 
   @Get()
   async getProfile(@Headers('authorization') authorization: string | undefined) {
-    const { issuer, subject } = await this.identity.requireUser(authorization);
+    const { issuer, subject, supabaseProfileId } = await this.identity.requireUser(authorization);
     const { rows: [profile] } = await this.database.pool.query(`
       select p.id, p.alias, p.neighborhood, p.sector, p.district_ubigeo, p.bio,
         p.approx_lat, p.approx_lng, p.use_gps_approx, p.share_resources_consent, p.updated_at
-      from public.profile_identities i join public.profiles p on p.id = i.profile_id
-      where i.issuer = $1 and i.subject = $2
-    `, [issuer, subject]);
+      from public.profiles p
+      where p.id = coalesce($3::uuid, (
+        select profile_id from public.profile_identities where issuer = $1 and subject = $2
+      )) and ($3::uuid is null or not p.is_demo)
+    `, [issuer, subject, supabaseProfileId ?? null]);
     if (!profile) throw new NotFoundException('Completa tu perfil de Conecta2.');
     return profile;
   }
@@ -24,11 +26,23 @@ export class ProfileController {
     @Headers('authorization') authorization: string | undefined,
     @Body('alias') input: unknown,
   ) {
-    const { issuer, subject } = await this.identity.requireUser(authorization);
+    const { issuer, subject, supabaseProfileId } = await this.identity.requireUser(authorization);
     const alias = typeof input === 'string' ? input.trim() : '';
     const length = [...alias].length;
     if (length < 2 || length > 60 || alias.includes('\0')) {
       throw new BadRequestException('El alias debe contener entre 2 y 60 caracteres válidos.');
+    }
+
+    if (supabaseProfileId) {
+      // Los perfiles de la instantánea conservaron el UUID de Supabase Auth.
+      const { rows: [profile] } = await this.database.pool.query(`
+        insert into public.profiles (id, alias) values ($1, $2)
+        on conflict (id) do update set id = excluded.id where not profiles.is_demo
+        returning id, alias, neighborhood, sector, district_ubigeo, bio,
+          approx_lat, approx_lng, use_gps_approx, share_resources_consent, updated_at
+      `, [supabaseProfileId, alias]);
+      if (!profile) throw new ForbiddenException('No se puede usar este perfil.');
+      return profile;
     }
 
     const client = await this.database.pool.connect();
