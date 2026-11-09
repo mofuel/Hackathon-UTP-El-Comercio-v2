@@ -1,0 +1,15 @@
+**
+!backend/
+!backend/Dockerfile
+!backend/package.json
+!backend/package-lock.json
+!backend/tsconfig.json
+!backend/src/
+!backend/src/**
+!backend/scripts/
+!backend/scripts/**
+!backend/migrations/
+!backend/migrations/**
+!assets/
+!assets/geography/
+!assets/geography/peru_ubigeo_2026.json

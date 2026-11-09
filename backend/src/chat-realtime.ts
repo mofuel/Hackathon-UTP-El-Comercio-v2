@@ -1,12 +1,22 @@
 import { WebPubSubServiceClient } from '@azure/web-pubsub';
+import { ManagedIdentityCredential } from '@azure/identity';
 import { Injectable, Logger } from '@nestjs/common';
 
 @Injectable()
 export class ChatRealtime {
   private readonly logger = new Logger(ChatRealtime.name);
-  private readonly client = process.env.WEB_PUBSUB_CONNECTION_STRING
-    ? new WebPubSubServiceClient(process.env.WEB_PUBSUB_CONNECTION_STRING, process.env.WEB_PUBSUB_HUB || 'conecta2-chat')
-    : null;
+  private readonly client = this.createClient();
+
+  private createClient() {
+    const hub = process.env.WEB_PUBSUB_HUB || 'conecta2-chat';
+    const endpoint = process.env.WEB_PUBSUB_ENDPOINT;
+    if (endpoint) {
+      const clientId = process.env.WEB_PUBSUB_IDENTITY_CLIENT_ID;
+      return new WebPubSubServiceClient(endpoint, new ManagedIdentityCredential({ clientId }), hub);
+    }
+    const connectionString = process.env.WEB_PUBSUB_CONNECTION_STRING;
+    return connectionString ? new WebPubSubServiceClient(connectionString, hub) : null;
+  }
 
   async negotiate(actor: string, district: string | null) {
     if (!this.client) return { url: null };
